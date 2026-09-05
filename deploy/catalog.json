@@ -1,0 +1,14 @@
+{
+  "services": [
+    {
+      "name": "shop-server",
+      "dockerfile": "shop-server/Dockerfile",
+      "containerPort": 8000
+    },
+    {
+      "name": "configure-server",
+      "dockerfile": "configure-server/Dockerfile",
+      "containerPort": 9000
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+database:
+  default:
+    link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/app_db"
+    debug: true

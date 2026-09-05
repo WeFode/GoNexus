@@ -1,0 +1,20 @@
+/* 不引入 Tailwind preflight，避免覆盖 antd 默认样式 */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ant-color-bg-layout, #f5f5f5);
+}
+
+.yaml-editor {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 13px;
+  line-height: 20px;
+}

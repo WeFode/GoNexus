@@ -1,0 +1,24 @@
+# CLI tool, only in development environment.
+# https://goframe.org/docs/cli
+gfcli:
+  gen:
+    dao:
+      - link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/app_db"
+        descriptionTag: true
+        tables: "products"
+
+    ctrl:
+      sdkPath: ""
+
+  build:
+    name:     "main"
+    arch:     "amd64"
+    system:   "linux"
+    mod:      "none"
+    path:     "./bin"
+    packSrc:  "manifest/config"
+
+  docker:
+    build: "-a amd64 -s linux -p temp -ew"
+    tagPrefixes:
+      - my.image.pub/shop-server

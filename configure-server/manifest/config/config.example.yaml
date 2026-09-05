@@ -1,0 +1,40 @@
+# 复制为 config.yaml 后按本机修改。
+
+server:
+  address:     ":9000"
+  openapiPath: "/api.json"
+  swaggerPath: "/swagger"
+  clientMaxBodySize: "512MB"
+
+logger:
+  level: "all"
+  stdout: true
+
+database:
+  default:
+    link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/config_center"
+    debug: true
+  postgres:
+    link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/postgres"
+    debug: false
+
+svc:
+  etcd:
+    host: "127.0.0.1:2379"
+    seedDir: "manifest/etcd-seed"
+
+auth:
+  jwtSecret: "configure-center-dev-secret-change-me"
+  expire: "24h"
+  users:
+    - username: admin
+      password: admin123
+      role: admin
+    - username: operator
+      password: operator123
+      role: operator
+  agentToken: "dev-agent-token"
+
+deploy:
+  artifactDir: "data/artifacts"
+  jobTimeout: "10m"

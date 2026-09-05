@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: configure-server
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 9000
+  selector:
+    app: configure-server

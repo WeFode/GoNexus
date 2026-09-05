@@ -1,0 +1,249 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcfg"
+	"github.com/gogf/gf/v2/os/gctx"
+
+	"deploy-agent/internal/dockerx"
+)
+
+const version = "0.1.1"
+
+type job struct {
+	Id            int64  `json:"id"`
+	Action        string `json:"action"`
+	ServiceName   string `json:"serviceName"`
+	ImageName     string `json:"imageName"`
+	ArtifactId    int64  `json:"artifactId"`
+	ContainerName string `json:"containerName"`
+	HostPort      int    `json:"hostPort"`
+	ContainerPort int    `json:"containerPort"`
+	DockerNetwork string `json:"dockerNetwork"`
+	LoopbackAs    string `json:"loopbackAs"`
+	EtcdHost      string `json:"etcdHost"`
+}
+
+func main() {
+	ctx := gctx.GetInitCtx()
+	if err := run(ctx); err != nil {
+		g.Log().Fatal(ctx, err)
+	}
+}
+
+func run(ctx context.Context) error {
+	interval := g.Cfg().MustGet(ctx, "agent.interval", "10s").Duration()
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	g.Log().Infof(ctx, "deploy-agent %s node=%s server=%s",
+		version,
+		g.Cfg().MustGet(ctx, "agent.nodeId").String(),
+		g.Cfg().MustGet(ctx, "agent.server").String())
+	for {
+		if err := tick(ctx); err != nil {
+			g.Log().Warningf(ctx, "heartbeat: %v", err)
+		}
+		time.Sleep(interval)
+	}
+}
+
+func tick(ctx context.Context) error {
+	ncpu, mem, osName, arch, platform, err := dockerx.Info()
+	if err != nil {
+		return fmt.Errorf("docker info: %w", err)
+	}
+	containers, err := dockerx.ListContainers()
+	if err != nil {
+		return fmt.Errorf("docker ps: %w", err)
+	}
+	body := g.Map{
+		"nodeId":         g.Cfg().MustGet(ctx, "agent.nodeId").String(),
+		"hostname":       hostname(),
+		"os":             osName,
+		"arch":           arch,
+		"dockerPlatform": platform,
+		"dockerNetwork":  g.Cfg().MustGet(ctx, "agent.dockerNetwork").String(),
+		"loopbackAs":     g.Cfg().MustGet(ctx, "agent.loopbackAs", "host.docker.internal").String(),
+		"ncpu":           ncpu,
+		"memoryBytes":    mem,
+		"agentVersion":   version,
+		"containers":     containers,
+	}
+	var hb struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Jobs []job `json:"jobs"`
+		} `json:"data"`
+	}
+	if err = api(ctx, http.MethodPost, "/api/v1/agent/heartbeat", body, &hb); err != nil {
+		return err
+	}
+	if hb.Code != 0 {
+		return fmt.Errorf("heartbeat: %s", hb.Message)
+	}
+	g.Log().Debugf(ctx, "heartbeat ok jobs=%d", len(hb.Data.Jobs))
+	for _, j := range hb.Data.Jobs {
+		if err = handleJob(ctx, j); err != nil {
+			g.Log().Warningf(ctx, "job %d failed: %v", j.Id, err)
+			_ = report(ctx, j.Id, "failed", err.Error())
+		}
+	}
+	return nil
+}
+
+func handleJob(ctx context.Context, j job) error {
+	g.Log().Infof(ctx, "执行任务 #%d %s %s", j.Id, j.Action, j.ServiceName)
+	_ = report(ctx, j.Id, "running", "")
+	if j.Action == "stop" {
+		_ = dockerx.Remove(j.ContainerName)
+		return report(ctx, j.Id, "success", "stopped")
+	}
+	tarPath, err := downloadArtifact(ctx, j.ArtifactId)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tarPath)
+	if err = dockerx.Load(tarPath); err != nil {
+		return err
+	}
+	_ = dockerx.Remove(j.ContainerName)
+	work := filepath.Join("data", "instances", j.ServiceName)
+	cfgDir := filepath.Join(work, "config")
+	dataDir := filepath.Join(work, "cache")
+	if err = os.MkdirAll(cfgDir, 0o755); err != nil {
+		return err
+	}
+	if err = os.MkdirAll(dataDir, 0o755); err != nil {
+		return err
+	}
+	loop := j.LoopbackAs
+	if loop == "" {
+		loop = "host.docker.internal"
+	}
+	cfg := fmt.Sprintf("svc:\n  etcd:\n    host: %q\n    watch: true\n    snapshotDir: data/config-cache\n    loopbackAs: %q\n",
+		j.EtcdHost, loop)
+	cfgPath := filepath.Join(cfgDir, "config.yaml")
+	if err = os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		return err
+	}
+	absCfg, _ := filepath.Abs(cfgPath)
+	absData, _ := filepath.Abs(dataDir)
+	port := j.ContainerPort
+	if port <= 0 {
+		port = 8000
+	}
+	hostPort := j.HostPort
+	if hostPort <= 0 {
+		hostPort = port
+	}
+	netName := j.DockerNetwork
+	if netName == "" {
+		netName = g.Cfg().MustGet(ctx, "agent.dockerNetwork").String()
+	}
+	if err = dockerx.RunDetached(j.ContainerName, j.ImageName, netName, hostPort, port, absCfg, absData); err != nil {
+		return err
+	}
+	return report(ctx, j.Id, "success", "started "+j.ContainerName)
+}
+
+func downloadArtifact(ctx context.Context, id int64) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL()+"/api/v1/agent/artifacts/"+fmt.Sprintf("%d", id)+"/file", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("X-Agent-Token", token())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(res.Body)
+		return "", fmt.Errorf("download artifact %d: %s %s", id, res.Status, string(b))
+	}
+	f, err := os.CreateTemp("", "artifact-*.tar")
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(f, res.Body)
+	cerr := f.Close()
+	if err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	if cerr != nil {
+		_ = os.Remove(f.Name())
+		return "", cerr
+	}
+	return f.Name(), nil
+}
+
+func report(ctx context.Context, id int64, status, message string) error {
+	var out struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	err := api(ctx, http.MethodPost, fmt.Sprintf("/api/v1/agent/jobs/%d/report", id), g.Map{
+		"status":  status,
+		"message": message,
+	}, &out)
+	if err != nil {
+		return err
+	}
+	if out.Code != 0 {
+		return fmt.Errorf(out.Message)
+	}
+	return nil
+}
+
+func api(ctx context.Context, method, path string, body any, dest any) error {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, serverURL()+path, rdr)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Agent-Token", token())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	return json.NewDecoder(res.Body).Decode(dest)
+}
+
+func serverURL() string {
+	return g.Cfg().MustGet(context.Background(), "agent.server", "http://127.0.0.1:9000").String()
+}
+
+func token() string {
+	return g.Cfg().MustGet(context.Background(), "agent.token").String()
+}
+
+func hostname() string {
+	h, _ := os.Hostname()
+	return h
+}
+
+func init() {
+	_ = gcfg.Instance()
+}

@@ -1,0 +1,8 @@
+# 微服务本地只保留 etcd 入口。database / redis / server / logger 等由配置中心下发。
+# 把 your-service 换成真实服务名（与中台「服务配置」key、catalog.name 相同）。
+
+svc:
+  etcd:
+    host: "127.0.0.1:2379@your-service"
+    watch: true
+    snapshotDir: "data/config-cache"
