@@ -49,18 +49,18 @@ func (s *sDeploy) Heartbeat(ctx context.Context, in *v1.HeartbeatReq) ([]v1.JobI
 	raw, _ := json.Marshal(managed)
 	now := gtime.Now()
 	data := g.Map{
-		"node_id":          in.NodeId,
-		"hostname":         in.Hostname,
-		"os":               in.OS,
-		"arch":             in.Arch,
-		"docker_platform":  in.DockerPlatform,
-		"docker_network":   in.DockerNetwork,
-		"loopback_as":      in.LoopbackAs,
-		"ncpu":             in.Ncpu,
-		"memory_bytes":     in.MemoryBytes,
-		"agent_version":    in.AgentVersion,
-		"containers":       string(raw),
-		"last_seen":        now,
+		"node_id":         in.NodeId,
+		"hostname":        in.Hostname,
+		"os":              in.OS,
+		"arch":            in.Arch,
+		"docker_platform": in.DockerPlatform,
+		"docker_network":  in.DockerNetwork,
+		"loopback_as":     in.LoopbackAs,
+		"ncpu":            in.Ncpu,
+		"memory_bytes":    in.MemoryBytes,
+		"agent_version":   in.AgentVersion,
+		"containers":      string(raw),
+		"last_seen":       now,
 	}
 	n, err := g.DB().Model("deploy_nodes").Where("node_id", in.NodeId).Count()
 	if err != nil {
@@ -112,7 +112,7 @@ func (s *sDeploy) toAgentJob(ctx context.Context, row jobRow) (v1.JobItem, error
 		ServiceName:   row.ServiceName,
 		ImageName:     row.ImageName,
 		ArtifactId:    row.ArtifactId,
-		ContainerName: "cc-" + row.ServiceName,
+		ContainerName: containerName(row.Action, row.ServiceName),
 		HostPort:      row.HostPort,
 		DockerNetwork: row.DockerNetwork,
 		LoopbackAs:    row.LoopbackAs,
@@ -131,6 +131,13 @@ func (s *sDeploy) toAgentJob(ctx context.Context, row jobRow) (v1.JobItem, error
 	}
 	item.EtcdHost = item.LoopbackAs + ":2379@" + row.ServiceName
 	return item, nil
+}
+
+func containerName(action, serviceName string) string {
+	if action == "canary" || action == "stop-canary" {
+		return "cc-" + serviceName + "-canary"
+	}
+	return "cc-" + serviceName
 }
 
 type jobRow struct {
@@ -347,50 +354,89 @@ func (s *sDeploy) SaveArtifact(ctx context.Context, meta v1.ArtifactItem, r io.R
 	return &item, nil
 }
 
-func (s *sDeploy) CreateDeploy(ctx context.Context, nodeIds []string, artifactId int64, hostPort int, operator, remark string) ([]int64, error) {
+func (s *sDeploy) CreateDeploy(ctx context.Context, in service.DeployRequest) ([]int64, error) {
 	_ = s.reclaimStaleJobs(ctx)
-	art, err := s.artifactByID(ctx, artifactId)
+	if len(in.NodeIds) == 0 {
+		return nil, gerror.New("请选择至少一个节点")
+	}
+	art, err := s.artifactByID(ctx, in.ArtifactId)
 	if err != nil {
 		return nil, err
 	}
+	hostPort := in.HostPort
 	if hostPort <= 0 {
 		hostPort = art.ContainerPort
 	}
+	operator := in.Operator
 	if operator == "" {
 		operator = "anonymous"
 	}
-	ids := make([]int64, 0, len(nodeIds))
-	for _, nodeId := range nodeIds {
-		node, err := s.nodeByID(ctx, nodeId)
+	strategy := strings.ToLower(strings.TrimSpace(in.Strategy))
+	if strategy == "" {
+		strategy = "canary"
+	}
+	if strategy != "canary" && strategy != "all" {
+		return nil, gerror.New("strategy 只能是 canary 或 all")
+	}
+	canaryCount := in.CanaryCount
+	if canaryCount <= 0 {
+		canaryCount = 1
+	}
+
+	if in.CanaryHostPort > 0 {
+		if len(in.NodeIds) != 1 {
+			return nil, gerror.New("旁路灰度请只选一个节点")
+		}
+		if in.CanaryHostPort == hostPort {
+			return nil, gerror.New("灰度端口不能与主端口相同")
+		}
+		id, err := s.insertNodeJob(ctx, in.NodeIds[0], art, "canary", "pending", in.CanaryHostPort, operator, in.Remark)
 		if err != nil {
-			return ids, err
+			return nil, err
 		}
-		if node.LastSeen == nil || time.Since(node.LastSeen.Time) > 45*time.Second {
-			return ids, gerror.Newf("节点 %s 离线，请先在该机器启动 deploy-agent", nodeId)
+		return []int64{id}, nil
+	}
+
+	ids := make([]int64, 0, len(in.NodeIds))
+	for i, nodeId := range in.NodeIds {
+		status := "pending"
+		if strategy == "canary" && i >= canaryCount {
+			status = "waiting"
 		}
-		if !platformsMatch(art.Platform, node.DockerPlatform) {
-			return ids, gerror.Newf("产物平台 %s 与节点 Docker %s 不一致，请重新打包", art.Platform, node.DockerPlatform)
-		}
-		id, err := g.DB().Model("deploy_jobs").Data(g.Map{
-			"node_id":         nodeId,
-			"artifact_id":     artifactId,
-			"service_name":    art.ServiceName,
-			"action":          "deploy",
-			"status":          "pending",
-			"image_name":      art.ImageName,
-			"host_port":       hostPort,
-			"docker_network":  node.DockerNetwork,
-			"loopback_as":     node.LoopbackAs,
-			"message":         remark,
-			"operator":        operator,
-			"updated_at":      gtime.Now(),
-		}).InsertAndGetId()
+		id, err := s.insertNodeJob(ctx, nodeId, art, "deploy", status, hostPort, operator, in.Remark)
 		if err != nil {
 			return ids, err
 		}
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+func (s *sDeploy) insertNodeJob(ctx context.Context, nodeId string, art *artifactRow, action, status string, hostPort int, operator, remark string) (int64, error) {
+	node, err := s.nodeByID(ctx, nodeId)
+	if err != nil {
+		return 0, err
+	}
+	if node.LastSeen == nil || time.Since(node.LastSeen.Time) > 45*time.Second {
+		return 0, gerror.Newf("节点 %s 离线，请先在该机器启动 deploy-agent", nodeId)
+	}
+	if !platformsMatch(art.Platform, node.DockerPlatform) {
+		return 0, gerror.Newf("产物平台 %s 与节点 Docker %s 不一致，请重新打包", art.Platform, node.DockerPlatform)
+	}
+	return g.DB().Model("deploy_jobs").Data(g.Map{
+		"node_id":        nodeId,
+		"artifact_id":    art.Id,
+		"service_name":   art.ServiceName,
+		"action":         action,
+		"status":         status,
+		"image_name":     art.ImageName,
+		"host_port":      hostPort,
+		"docker_network": node.DockerNetwork,
+		"loopback_as":    node.LoopbackAs,
+		"message":        remark,
+		"operator":       operator,
+		"updated_at":     gtime.Now(),
+	}).InsertAndGetId()
 }
 
 func (s *sDeploy) nodeByID(ctx context.Context, nodeId string) (*nodeRow, error) {
@@ -425,12 +471,156 @@ func (s *sDeploy) Rollback(ctx context.Context, nodeId, serviceName, operator, r
 	if remark == "" {
 		remark = fmt.Sprintf("回滚到产物 %d", prev.ArtifactId)
 	}
-	ids, err := s.CreateDeploy(ctx, []string{nodeId}, prev.ArtifactId, prev.HostPort, operator, remark)
+	ids, err := s.CreateDeploy(ctx, service.DeployRequest{
+		NodeIds:    []string{nodeId},
+		ArtifactId: prev.ArtifactId,
+		HostPort:   prev.HostPort,
+		Operator:   operator,
+		Remark:     remark,
+		Strategy:   "all",
+	})
 	if err != nil {
 		return 0, err
 	}
 	_, _ = g.DB().Model("deploy_jobs").Where("id", ids[0]).Data(g.Map{"action": "rollback"}).Update()
 	return ids[0], nil
+}
+
+func (s *sDeploy) Promote(ctx context.Context, artifactId int64, operator, remark string) ([]int64, error) {
+	if operator == "" {
+		operator = "anonymous"
+	}
+	if remark == "" {
+		remark = "推进灰度"
+	}
+	var waiting []jobRow
+	err := g.DB().Model("deploy_jobs").
+		Where("artifact_id", artifactId).
+		Where("status", "waiting").
+		OrderAsc("id").
+		Scan(&waiting)
+	if err != nil {
+		return nil, err
+	}
+	if len(waiting) > 0 {
+		ids := make([]int64, 0, len(waiting))
+		for _, row := range waiting {
+			ids = append(ids, row.Id)
+		}
+		_, err = g.DB().Model("deploy_jobs").WhereIn("id", ids).Data(g.Map{
+			"status":     "pending",
+			"message":    remark,
+			"updated_at": gtime.Now(),
+		}).Update()
+		return ids, err
+	}
+
+	var canaries []jobRow
+	err = g.DB().Model("deploy_jobs").
+		Where("artifact_id", artifactId).
+		Where("action", "canary").
+		Where("status", "success").
+		OrderDesc("id").
+		Scan(&canaries)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]jobRow{}
+	for _, row := range canaries {
+		if _, ok := seen[row.NodeId]; !ok {
+			seen[row.NodeId] = row
+		}
+	}
+	if len(seen) == 0 {
+		return nil, gerror.New("没有可推进的灰度任务（无等待节点，也无成功的旁路灰度）")
+	}
+
+	ids := make([]int64, 0, len(seen)*2)
+	for _, row := range seen {
+		hostPort := 0
+		var mains []jobRow
+		_ = g.DB().Model("deploy_jobs").
+			Where("node_id", row.NodeId).
+			Where("service_name", row.ServiceName).
+			Where("action", "deploy").
+			Where("status", "success").
+			OrderDesc("id").
+			Limit(1).
+			Scan(&mains)
+		if len(mains) > 0 {
+			hostPort = mains[0].HostPort
+		}
+		created, err := s.CreateDeploy(ctx, service.DeployRequest{
+			NodeIds:    []string{row.NodeId},
+			ArtifactId: artifactId,
+			HostPort:   hostPort,
+			Operator:   operator,
+			Remark:     remark,
+			Strategy:   "all",
+		})
+		if err != nil {
+			return ids, err
+		}
+		ids = append(ids, created...)
+		stopId, err := s.insertLifecycleJob(ctx, row.NodeId, row.ServiceName, "stop-canary", operator, "下线旁路灰度容器")
+		if err != nil {
+			return ids, err
+		}
+		ids = append(ids, stopId)
+	}
+	return ids, nil
+}
+
+func (s *sDeploy) CreateLifecycle(ctx context.Context, nodeId, serviceName, action, operator string) (int64, error) {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action != "start" && action != "stop" && action != "restart" {
+		return 0, gerror.New("action 必须是 start / stop / restart")
+	}
+	if operator == "" {
+		operator = "anonymous"
+	}
+	return s.insertLifecycleJob(ctx, nodeId, serviceName, action, operator, "")
+}
+
+func (s *sDeploy) insertLifecycleJob(ctx context.Context, nodeId, serviceName, action, operator, remark string) (int64, error) {
+	node, err := s.nodeByID(ctx, nodeId)
+	if err != nil {
+		return 0, err
+	}
+	if node.LastSeen == nil || time.Since(node.LastSeen.Time) > 45*time.Second {
+		return 0, gerror.Newf("节点 %s 离线，请先在该机器启动 deploy-agent", nodeId)
+	}
+	want := containerName(action, serviceName)
+	if action == "start" || action == "stop" || action == "restart" {
+		found := false
+		if node.Containers != "" {
+			var all []v1.ContainerInfo
+			_ = json.Unmarshal([]byte(node.Containers), &all)
+			for _, c := range all {
+				if c.Name == want {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			return 0, gerror.Newf("节点 %s 上没有容器 %s，请先发布", nodeId, want)
+		}
+	}
+	return g.DB().Model("deploy_jobs").Data(g.Map{
+		"node_id":        nodeId,
+		"artifact_id":    0,
+		"service_name":   serviceName,
+		"action":         action,
+		"status":         "pending",
+		"image_name":     "",
+		"host_port":      0,
+		"docker_network": node.DockerNetwork,
+		"loopback_as":    node.LoopbackAs,
+		"message":        remark,
+		"operator":       operator,
+		"updated_at":     gtime.Now(),
+	}).InsertAndGetId()
 }
 
 func (s *sDeploy) ListJobs(ctx context.Context, nodeId string) ([]v1.DeployJobItem, error) {

@@ -21,3 +21,10 @@ COMMENT ON COLUMN products.description IS '商品描述';
 COMMENT ON COLUMN products.price IS '价格';
 COMMENT ON COLUMN products.stock IS '库存';
 COMMENT ON COLUMN products.status IS '状态：1上架 0下架';
+
+
+        -- 示例商品数据（可按需删除）
+INSERT INTO products (name, description, price, stock, status)
+VALUES
+    ('示例商品 A', '脚手架演示商品', 99.00, 100, 1),
+    ('示例商品 B', '脚手架演示商品', 199.50, 50, 1);

@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "github.com/gogf/gf/contrib/drivers/dm/v2"
 	_ "shop-server/internal/packed"
 
 	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"

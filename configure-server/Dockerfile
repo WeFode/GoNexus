@@ -11,7 +11,7 @@ COPY configure-server ./configure-server
 WORKDIR /src/configure-server
 RUN go mod download
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w" -o /out/main .
+    go build -buildvcs=false -ldflags="-s -w" -o /out/main .
 
 FROM alpine:3.18
 RUN apk add --no-cache tzdata ca-certificates wget && \
@@ -21,6 +21,7 @@ WORKDIR /app
 COPY --from=builder /out/main /app/main
 COPY configure-server/manifest/config/config.example.yaml /app/manifest/config/config.yaml
 COPY configure-server/manifest/etcd-seed /app/manifest/etcd-seed
+COPY configure-server/manifest/sql /app/manifest/sql
 RUN chmod +x /app/main
 EXPOSE 9000
 CMD ["/app/main"]

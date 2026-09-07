@@ -1,0 +1,16 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="shop-server" type="GoApplicationRunConfiguration" factoryName="Go Application">
+    <module name="configure-center" />
+    <working_directory value="$PROJECT_DIR$/shop-server" />
+    <go_parameters value="-buildvcs=false" />
+    <kind value="PACKAGE" />
+    <package value="shop-server" />
+    <directory value="$PROJECT_DIR$/shop-server" />
+    <filePath value="$PROJECT_DIR$/shop-server/main.go" />
+    <envs>
+      <env name="GOFLAGS" value="-buildvcs=false" />
+      <env name="GOTOOLCHAIN" value="local" />
+    </envs>
+    <method v="2" />
+  </configuration>
+</component>

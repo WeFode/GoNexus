@@ -84,7 +84,16 @@ func (c *ControllerV1) UploadArtifact(ctx context.Context, req *v1.UploadArtifac
 }
 
 func (c *ControllerV1) CreateDeploy(ctx context.Context, req *v1.CreateDeployReq) (*v1.CreateDeployRes, error) {
-	ids, err := service.Deploy().CreateDeploy(ctx, req.NodeIds, req.ArtifactId, req.HostPort, operator(ctx), req.Remark)
+	ids, err := service.Deploy().CreateDeploy(ctx, service.DeployRequest{
+		NodeIds:        req.NodeIds,
+		ArtifactId:     req.ArtifactId,
+		HostPort:       req.HostPort,
+		Operator:       operator(ctx),
+		Remark:         req.Remark,
+		Strategy:       req.Strategy,
+		CanaryCount:    req.CanaryCount,
+		CanaryHostPort: req.CanaryHostPort,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +106,22 @@ func (c *ControllerV1) RollbackDeploy(ctx context.Context, req *v1.RollbackDeplo
 		return nil, err
 	}
 	return &v1.RollbackDeployRes{JobId: id}, nil
+}
+
+func (c *ControllerV1) PromoteDeploy(ctx context.Context, req *v1.PromoteDeployReq) (*v1.PromoteDeployRes, error) {
+	ids, err := service.Deploy().Promote(ctx, req.ArtifactId, operator(ctx), req.Remark)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.PromoteDeployRes{JobIds: ids}, nil
+}
+
+func (c *ControllerV1) Lifecycle(ctx context.Context, req *v1.LifecycleReq) (*v1.LifecycleRes, error) {
+	id, err := service.Deploy().CreateLifecycle(ctx, req.NodeId, req.ServiceName, req.Action, operator(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return &v1.LifecycleRes{JobId: id}, nil
 }
 
 func (c *ControllerV1) ListJobs(ctx context.Context, req *v1.ListJobsReq) (*v1.ListJobsRes, error) {

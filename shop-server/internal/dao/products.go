@@ -8,14 +8,14 @@ import (
 	"shop-server/internal/dao/internal"
 )
 
-// productsDao is the data access object for the table products.
+// productsDao is the data access object for the table PRODUCTS.
 // You can define custom methods on it to extend its functionality as needed.
 type productsDao struct {
 	*internal.ProductsDao
 }
 
 var (
-	// Products is a globally accessible object for table products operations.
+	// Products is a globally accessible object for table PRODUCTS operations.
 	Products = productsDao{internal.NewProductsDao()}
 )
 

@@ -2,6 +2,8 @@
 
 基于 **etcd + GoFrame** 的配置中心方案：各微服务本地只保留 etcd 入口，业务配置由 `configure-server` 统一写入 etcd 并支持热更新。
 
+用法见本文；**实现链路、依赖、API 与文件调用顺序**见 [IMPLEMENTATION.md](./IMPLEMENTATION.md)。配置中心库表脚本见 [configure-server/manifest/sql](./configure-server/manifest/sql)（PostgreSQL / 达梦）。
+
 ## 目录结构
 
 ```
@@ -102,8 +104,8 @@ curl http://127.0.0.1:8000/api/v1/config/runtime
 | GET/PUT/DELETE | `/api/v1/configs/shared/{key}` | 公共配置 |
 | GET/PUT/DELETE | `/api/v1/configs/services/{name}` | 服务配置 |
 | GET | `/api/v1/configs/preview/{name}` | 预览合并后 YAML |
-| GET | `/api/v1/configs/history/{kind}/{key}` | 发布历史（Postgres `config_center.config_history`） |
-| POST | `/api/v1/configs/rollback` | 按历史版本回滚（etcd Put + 新历史记录） |
+| GET | `/api/v1/configs/history/{kind}/{key}` | 发布历史（`config_history`，脚本在 `configure-server/manifest/sql`） |
+| POST | `/api/v1/configs/rollback` | 按历史版本回滚（etcd Put + 新历史记录）。保存时会先补录旧快照 |
 | POST | `/api/v1/configs/seed` | 重新灌入 `manifest/etcd-seed` |
 
 etcd 仍是配置真相源；Postgres 只存审计/回滚，不双写运行时配置。写操作的 `operator` 取自 JWT 登录用户，前端不能伪造。
@@ -167,7 +169,7 @@ s.Group("/api/v1", func(group *ghttp.RouterGroup) {
 { "name": "your-service", "dockerfile": "your-service/Dockerfile", "containerPort": 8080 }
 ```
 
-`.\package.ps1 -Service your-service` 生成 tar，中台上传后由各节点 Agent 部署。容器名固定为 `cc-<服务名>`。
+`.\package.ps1 -Service your-service` 生成 tar，中台上传后由各节点 Agent 部署。容器名固定为 `cc-<服务名>`（旁路灰度为 `cc-<服务名>-canary`）。
 
 ## Docker 打包与部署
 
@@ -179,9 +181,32 @@ s.Group("/api/v1", func(group *ghttp.RouterGroup) {
 .\package.ps1 -Platform linux/arm64
 ```
 
-产物在 `deploy/dist/<服务>-linux-amd64.tar`，上传到中台「发布」页。机器上跑 `deploy-agent`（与配置中心 `auth.agentToken` 一致），中台即可下发 `docker load` + 拉起容器，不必 SSH。选一台节点发布即灰度，任务成功后再发其它节点；回滚会把该节点上一成功产物重新发布。
+产物在 `deploy/dist/<服务>-linux-amd64.tar`，上传到中台「发布」页。机器上跑 `deploy-agent`（与配置中心 `auth.agentToken` 一致），中台即可下发 `docker load` + 拉起容器，不必 SSH。
 
-配置热更新仍走 etcd Watch，与镜像发布相互独立。
+**发布策略（只负责把镜像跑起来，不切用户流量）**
+
+配置中心的「灰度 / 全量」是**发布编排**：新 tar 先出现在哪些机器、哪个端口。用户请求仍打到原来的地址，直到网关把流量切过去。
+
+| 策略 | 行为 |
+|------|------|
+| **灰度（多节点）** | 先给前 N 台下发 `pending`，其余 `waiting`。金丝雀验证通过后点「推进其余节点」。 |
+| **灰度（单节点）** | 只发这一台。若填写**灰度端口**，旧容器不中断，新版本以 `cc-<服务>-canary` 旁路运行；确认后再「转正」。 |
+| **全量** | 选中节点同时替换主容器。 |
+
+**流量灰度（用户无感）要由 API Gateway 做**，不是发布页。正确闭环：
+
+1. 旧实例继续在主端口提供服务（用户仍走网关 → 旧实例）。
+2. 发布页用旁路端口拉起新 tar（`cc-<服务>-canary`），此时**没有用户会打到它**。
+3. 在配置中心写网关路由（白名单 user/IP/Header，或百分比），网关 Watch etcd 后只把命中名单的请求转到 canary。
+4. 验证通过：把网关切到 100% 新版本，再在发布页「转正」替换主容器、下线 canary。失败则关掉白名单，旧实例一直在。
+
+本仓库目前没有网关进程；`shop-server` 不会自己按白名单把流量分给另一份自己。白名单配置给 **gateway-server**（统一入口）读，不要写在业务服务里。
+
+节点页可对已发布容器 **启动 / 停止 / 重启**（Agent 调 `docker start/stop/restart`）。心跳会带上容器 CPU/内存（`docker stats`），便于看是否还活着；QPS/延迟仍应走 Prometheus，不必做进配置中心。
+
+回滚会把该节点上一成功产物重新发布。配置热更新仍走 etcd Watch，与镜像发布相互独立。
+
+**配置回滚**：每次保存会把 etcd 里**修改前**的 YAML 补进 `config_history`（若最新历史还不是这份旧内容），再追加新版本。历史里点旧版本回滚；当前这份不能回滚（它已是线上内容）。
 
 Agent：
 
@@ -250,4 +275,13 @@ A: 连接池在启动时建立，热重载只更新 `g.Cfg()` 内存。换 DSN �
 A: etcd 中已存在同名 key，seed 默认不覆盖。用 `POST /api/v1/configs/seed` 且 `"force": true` 强制覆盖。
 
 **Q: 本地开发端口**  
-A: configure-server `:9000`，shop-server `:8000`，etcd `2379`，Postgres `5433`，Redis `6380`。
+A: configure-server `:9000`，shop-server `:8000`，etcd `2379`，Postgres `5433`，Redis `6380`。本机 `go run` 的 shop-server 会占 8000，此时不要对 `cc-shop-server` 点启动（Docker 也会抢 8000）。要么停掉 `go run`，要么发布时换宿主机端口。
+
+**Q: 发布页灰度是不是网关白名单灰度？**  
+A: 不是。发布页只把新镜像跑起来；用户无感的流量切分要由 API Gateway 读配置中心（etcd）的白名单/百分比，把命中请求转到 canary 端口。业务服务本身不做这层路由。
+
+**Q: 启动日志写审计库未就绪？**  
+A: 库表已从 Go 代码挪到 `configure-server/manifest/sql`。本地 compose **只在空数据卷**时自动建 `config_center`。已有卷请手工执行 `pgsql/001_schema.sql`。达梦执行 `sql/dm/` 后把 `database.default.link` 改成 `dm:CONFIG_CENTER:...@tcp(ip:5236)` 即可，不必改代码。
+
+**Q: GoLand 编译 configure-server 报 `error obtaining VCS status: exit status 128`？**  
+A: `go build` 默认要打 Git 版本戳；GoLand 若用 Administrator 打开、仓库在别的用户目录下，Git 会返回 128。仓库已加 `-buildvcs=false`。在 GoLand：**Settings → Go → Build Tags / Vendoring** 或运行配置的 **Go tool arguments** 填 `-buildvcs=false`，环境变量 `GOFLAGS=-buildvcs=false`。也可选共享运行配置 `configure-server` / `shop-server`。

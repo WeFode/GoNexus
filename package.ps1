@@ -15,6 +15,7 @@ param(
 $ErrorActionPreference = "Stop"
 $env:DOCKER_BUILDKIT = "1"
 $env:GOTOOLCHAIN = "local"
+$env:GOFLAGS = "-buildvcs=false"
 $Root = $PSScriptRoot
 if (-not $OutDir) {
     $OutDir = Join-Path $Root "deploy\dist"

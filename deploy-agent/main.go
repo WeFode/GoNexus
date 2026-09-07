@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -18,7 +19,7 @@ import (
 	"deploy-agent/internal/dockerx"
 )
 
-const version = "0.1.1"
+const version = "0.2.1"
 
 type job struct {
 	Id            int64  `json:"id"`
@@ -67,6 +68,21 @@ func tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("docker ps: %w", err)
 	}
+	running := make([]string, 0, len(containers))
+	for _, c := range containers {
+		if strings.Contains(strings.ToLower(c.Status), "up") {
+			running = append(running, c.Name)
+		}
+	}
+	if stats, serr := dockerx.Stats(running); serr == nil {
+		for i, c := range containers {
+			if st, ok := stats[c.Name]; ok {
+				containers[i].CPUPerc = st.CPUPerc
+				containers[i].MemUsage = st.MemUsage
+				containers[i].MemPerc = st.MemPerc
+			}
+		}
+	}
 	body := g.Map{
 		"nodeId":         g.Cfg().MustGet(ctx, "agent.nodeId").String(),
 		"hostname":       hostname(),
@@ -106,9 +122,39 @@ func tick(ctx context.Context) error {
 func handleJob(ctx context.Context, j job) error {
 	g.Log().Infof(ctx, "执行任务 #%d %s %s", j.Id, j.Action, j.ServiceName)
 	_ = report(ctx, j.Id, "running", "")
-	if j.Action == "stop" {
-		_ = dockerx.Remove(j.ContainerName)
-		return report(ctx, j.Id, "success", "stopped")
+	name := j.ContainerName
+	if name == "" {
+		name = "cc-" + j.ServiceName
+	}
+	switch j.Action {
+	case "stop":
+		if err := dockerx.Stop(name); err != nil {
+			return err
+		}
+		return report(ctx, j.Id, "success", "stopped "+name)
+	case "start":
+		if err := dockerx.Start(name); err != nil {
+			return err
+		}
+		return report(ctx, j.Id, "success", "started "+name)
+	case "restart":
+		if err := dockerx.Restart(name); err != nil {
+			return err
+		}
+		return report(ctx, j.Id, "success", "restarted "+name)
+	case "stop-canary":
+		_ = dockerx.Remove(name)
+		return report(ctx, j.Id, "success", "removed "+name)
+	case "deploy", "rollback", "canary":
+		return deployImage(ctx, j, name)
+	default:
+		return fmt.Errorf("未知动作 %s", j.Action)
+	}
+}
+
+func deployImage(ctx context.Context, j job, containerName string) error {
+	if j.ArtifactId <= 0 {
+		return fmt.Errorf("产物 ID 无效")
 	}
 	tarPath, err := downloadArtifact(ctx, j.ArtifactId)
 	if err != nil {
@@ -118,8 +164,11 @@ func handleJob(ctx context.Context, j job) error {
 	if err = dockerx.Load(tarPath); err != nil {
 		return err
 	}
-	_ = dockerx.Remove(j.ContainerName)
+	_ = dockerx.Remove(containerName)
 	work := filepath.Join("data", "instances", j.ServiceName)
+	if j.Action == "canary" {
+		work = filepath.Join("data", "instances", j.ServiceName+"-canary")
+	}
 	cfgDir := filepath.Join(work, "config")
 	dataDir := filepath.Join(work, "cache")
 	if err = os.MkdirAll(cfgDir, 0o755); err != nil {
@@ -152,10 +201,10 @@ func handleJob(ctx context.Context, j job) error {
 	if netName == "" {
 		netName = g.Cfg().MustGet(ctx, "agent.dockerNetwork").String()
 	}
-	if err = dockerx.RunDetached(j.ContainerName, j.ImageName, netName, hostPort, port, absCfg, absData); err != nil {
+	if err = dockerx.RunDetached(containerName, j.ImageName, netName, hostPort, port, absCfg, absData); err != nil {
 		return err
 	}
-	return report(ctx, j.Id, "success", "started "+j.ContainerName)
+	return report(ctx, j.Id, "success", "started "+containerName)
 }
 
 func downloadArtifact(ctx context.Context, id int64) (string, error) {

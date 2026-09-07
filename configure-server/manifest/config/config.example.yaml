@@ -10,13 +10,12 @@ logger:
   level: "all"
   stdout: true
 
+# 库表脚本：manifest/sql/pgsql（本地）或 manifest/sql/dm（信创达梦）。
+# 达梦示例：link: "dm:CONFIG_CENTER:ConfigCenter_123@tcp(127.0.0.1:5236)"
 database:
   default:
     link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/config_center"
     debug: true
-  postgres:
-    link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/postgres"
-    debug: false
 
 svc:
   etcd:

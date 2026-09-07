@@ -2,8 +2,12 @@
 # https://goframe.org/docs/cli
 gfcli:
   gen:
-    ctrl:
-      sdkPath: ""
+    dao:
+      #  - link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/app_db"
+      - link: "dm:CONFIG_CENTER:ConfigCenter_123@tcp(127.0.0.1:5236)/CONFIG_CENTER"
+        descriptionTag: true
+        tables: "CONFIG_HISTORY,DEPLOY_NODES,DEPLOY_ARTIFACTS,DEPLOY_JOBS"
+        jsonCase: "Snake"
 
   build:
     name:     "main"
@@ -12,6 +16,7 @@ gfcli:
     mod:      "none"
     path:     "./bin"
     packSrc:  "manifest/config"
+    extra:    "-buildvcs=false"
 
   docker:
     build: "-a amd64 -s linux -p temp -ew"

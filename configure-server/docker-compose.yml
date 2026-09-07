@@ -29,27 +29,29 @@ services:
     networks:
       - gf_net
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: gf_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: app_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: "123456"
-      TZ: Asia/Shanghai
-    ports:
-      - "5433:5432"
-    volumes:
-      - gf_pg_data:/var/lib/postgresql/data
-      - ../shop-server/manifest/sql:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d app_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    networks:
-      - gf_net
+#  postgres:
+#    image: postgres:16-alpine
+#    container_name: gf_postgres
+#    restart: unless-stopped
+#    environment:
+#      POSTGRES_DB: app_db
+#      POSTGRES_USER: postgres
+#      POSTGRES_PASSWORD: "123456"
+#      TZ: Asia/Shanghai
+#    ports:
+#      - "5433:5432"
+#    volumes:
+#      - gf_pg_data:/var/lib/postgresql/data
+#      - ./scripts/pg-init:/docker-entrypoint-initdb.d:ro
+#      - ./manifest/sql/pgsql:/opt/sql/config-center:ro
+#      - ../shop-server/manifest/sql/pgsql:/opt/sql/shop:ro
+#    healthcheck:
+#      test: ["CMD-SHELL", "pg_isready -U postgres -d app_db"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 10
+#    networks:
+#      - gf_net
 
   redis:
     image: redis:7-alpine
@@ -73,5 +75,5 @@ networks:
 
 volumes:
   gf_etcd_data:
-  gf_pg_data:
+#  gf_pg_data:
   gf_redis_data:

@@ -5,6 +5,9 @@ export interface ContainerInfo {
   image: string
   status: string
   ports: string
+  cpuPerc?: string
+  memUsage?: string
+  memPerc?: string
 }
 
 export interface NodeItem {
@@ -74,10 +77,26 @@ export function uploadArtifact(file: File, meta: {
   return request<ArtifactItem>('/api/v1/artifacts', { method: 'POST', body })
 }
 
-export function createDeploy(nodeIds: string[], artifactId: number, hostPort?: number, remark?: string) {
+export function createDeploy(body: {
+  nodeIds: string[]
+  artifactId: number
+  hostPort?: number
+  remark?: string
+  strategy?: 'canary' | 'all'
+  canaryCount?: number
+  canaryHostPort?: number
+}) {
   return request<{ jobIds: number[] }>('/api/v1/deploys', {
     method: 'POST',
-    body: JSON.stringify({ nodeIds, artifactId, hostPort: hostPort || 0, remark: remark || '' }),
+    body: JSON.stringify({
+      nodeIds: body.nodeIds,
+      artifactId: body.artifactId,
+      hostPort: body.hostPort || 0,
+      remark: body.remark || '',
+      strategy: body.strategy || 'canary',
+      canaryCount: body.canaryCount || 1,
+      canaryHostPort: body.canaryHostPort || 0,
+    }),
   })
 }
 
@@ -85,6 +104,20 @@ export function rollbackDeploy(nodeId: string, serviceName: string, remark?: str
   return request<{ jobId: number }>('/api/v1/deploys/rollback', {
     method: 'POST',
     body: JSON.stringify({ nodeId, serviceName, remark: remark || '' }),
+  })
+}
+
+export function promoteDeploy(artifactId: number, remark?: string) {
+  return request<{ jobIds: number[] }>('/api/v1/deploys/promote', {
+    method: 'POST',
+    body: JSON.stringify({ artifactId, remark: remark || '' }),
+  })
+}
+
+export function lifecycleDeploy(nodeId: string, serviceName: string, action: 'start' | 'stop' | 'restart') {
+  return request<{ jobId: number }>('/api/v1/deploys/lifecycle', {
+    method: 'POST',
+    body: JSON.stringify({ nodeId, serviceName, action }),
   })
 }
 

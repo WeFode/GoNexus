@@ -14,5 +14,7 @@ type IDeployV1 interface {
 	UploadArtifact(ctx context.Context, req *v1.UploadArtifactReq) (res *v1.UploadArtifactRes, err error)
 	CreateDeploy(ctx context.Context, req *v1.CreateDeployReq) (res *v1.CreateDeployRes, err error)
 	RollbackDeploy(ctx context.Context, req *v1.RollbackDeployReq) (res *v1.RollbackDeployRes, err error)
+	PromoteDeploy(ctx context.Context, req *v1.PromoteDeployReq) (res *v1.PromoteDeployRes, err error)
+	Lifecycle(ctx context.Context, req *v1.LifecycleReq) (res *v1.LifecycleRes, err error)
 	ListJobs(ctx context.Context, req *v1.ListJobsReq) (res *v1.ListJobsRes, err error)
 }

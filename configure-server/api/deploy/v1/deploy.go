@@ -3,10 +3,13 @@ package v1
 import "github.com/gogf/gf/v2/frame/g"
 
 type ContainerInfo struct {
-	Name   string `json:"name"`
-	Image  string `json:"image"`
-	Status string `json:"status"`
-	Ports  string `json:"ports"`
+	Name     string `json:"name"`
+	Image    string `json:"image"`
+	Status   string `json:"status"`
+	Ports    string `json:"ports"`
+	CPUPerc  string `json:"cpuPerc"`
+	MemUsage string `json:"memUsage"`
+	MemPerc  string `json:"memPerc"`
 }
 
 type HeartbeatReq struct {
@@ -109,11 +112,14 @@ type UploadArtifactRes struct {
 }
 
 type CreateDeployReq struct {
-	g.Meta      `path:"/deploys" method:"post" tags:"Deploy" summary:"发布到指定节点（选一个节点即灰度）"`
-	NodeIds     []string `json:"nodeIds" v:"required"`
-	ArtifactId  int64    `json:"artifactId" v:"required"`
-	HostPort    int      `json:"hostPort" dc:"宿主机端口，默认等于容器端口"`
-	Remark      string   `json:"remark"`
+	g.Meta         `path:"/deploys" method:"post" tags:"Deploy" summary:"发布到指定节点（canary=灰度，all=全量）"`
+	NodeIds        []string `json:"nodeIds" v:"required"`
+	ArtifactId     int64    `json:"artifactId" v:"required"`
+	HostPort       int      `json:"hostPort" dc:"主容器宿主机端口，默认等于容器端口"`
+	Remark         string   `json:"remark"`
+	Strategy       string   `json:"strategy" dc:"canary（默认）或 all"`
+	CanaryCount    int      `json:"canaryCount" dc:"多节点灰度时先发几台，默认 1"`
+	CanaryHostPort int      `json:"canaryHostPort" dc:"单节点旁路灰度端口；设置后不替换旧容器，以 cc-<服务>-canary 运行"`
 }
 
 type CreateDeployRes struct {
@@ -128,6 +134,27 @@ type RollbackDeployReq struct {
 }
 
 type RollbackDeployRes struct {
+	JobId int64 `json:"jobId"`
+}
+
+type PromoteDeployReq struct {
+	g.Meta     `path:"/deploys/promote" method:"post" tags:"Deploy" summary:"推进灰度：等待中的节点改为下发，或将旁路 canary 转正"`
+	ArtifactId int64  `json:"artifactId" v:"required"`
+	Remark     string `json:"remark"`
+}
+
+type PromoteDeployRes struct {
+	JobIds []int64 `json:"jobIds"`
+}
+
+type LifecycleReq struct {
+	g.Meta      `path:"/deploys/lifecycle" method:"post" tags:"Deploy" summary:"通过 Agent 启动/停止/重启容器"`
+	NodeId      string `json:"nodeId" v:"required"`
+	ServiceName string `json:"serviceName" v:"required" dc:"容器名去掉 cc- 前缀，如 shop-server 或 shop-server-canary"`
+	Action      string `json:"action" v:"required|in:start,stop,restart"`
+}
+
+type LifecycleRes struct {
 	JobId int64 `json:"jobId"`
 }
 

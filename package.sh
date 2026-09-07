@@ -40,7 +40,7 @@ for name in "${NAMES[@]}"; do
   work="$(mktemp -d)"
   mkdir -p "$work/seed"
   echo "==> go build $name linux/$GOARCH"
-  ( cd "$ROOT/$name" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" go build -ldflags="-s -w" -o "$work/main" . )
+  ( cd "$ROOT/$name" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" go build -buildvcs=false -ldflags="-s -w" -o "$work/main" . )
   cp "$ROOT/$name/manifest/config/config.example.yaml" "$work/config.yaml"
   if [[ -d "$ROOT/$name/manifest/etcd-seed" ]]; then
     cp -a "$ROOT/$name/manifest/etcd-seed/." "$work/seed/"

@@ -22,10 +22,13 @@ func Run(args ...string) (string, error) {
 }
 
 type Container struct {
-	Name   string `json:"name"`
-	Image  string `json:"image"`
-	Status string `json:"status"`
-	Ports  string `json:"ports"`
+	Name     string `json:"name"`
+	Image    string `json:"image"`
+	Status   string `json:"status"`
+	Ports    string `json:"ports"`
+	CPUPerc  string `json:"cpuPerc"`
+	MemUsage string `json:"memUsage"`
+	MemPerc  string `json:"memPerc"`
 }
 
 func Info() (ncpu int, memory int64, osName, arch, platform string, err error) {
@@ -90,6 +93,49 @@ func Load(tarPath string) error {
 	return err
 }
 
+func Stop(name string) error {
+	_, err := Run("stop", name)
+	return err
+}
+
+func Start(name string) error {
+	_, err := Run("start", name)
+	return wrapBindError(name, nil, err)
+}
+
+func Restart(name string) error {
+	_, err := Run("restart", name)
+	return wrapBindError(name, nil, err)
+}
+
+func Stats(names []string) (map[string]Container, error) {
+	out := map[string]Container{}
+	if len(names) == 0 {
+		return out, nil
+	}
+	args := append([]string{"stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"}, names...)
+	s, err := Run(args...)
+	if err != nil {
+		return out, err
+	}
+	if s == "" {
+		return out, nil
+	}
+	for _, line := range strings.Split(s, "\n") {
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		out[parts[0]] = Container{
+			Name:     parts[0],
+			CPUPerc:  parts[1],
+			MemUsage: parts[2],
+			MemPerc:  parts[3],
+		}
+	}
+	return out, nil
+}
+
 func Remove(name string) error {
 	_, _ = Run("rm", "-f", name)
 	return nil
@@ -114,5 +160,5 @@ func RunDetached(name, image, network string, hostPort, containerPort int, confi
 	}
 	args = append(args, image)
 	_, err := Run(args...)
-	return err
+	return wrapBindError(name, []int{hostPort}, err)
 }

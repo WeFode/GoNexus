@@ -21,6 +21,7 @@ const (
 	actionUpdate   = "UPDATE"
 	actionDelete   = "DELETE"
 	actionRollback = "ROLLBACK"
+	actionBaseline = "BASELINE"
 )
 
 type sConfig struct{}
@@ -76,15 +77,7 @@ func (s *sConfig) GetShared(ctx context.Context, key string) (*v1.ConfigItem, er
 }
 
 func (s *sConfig) PutShared(ctx context.Context, key, content string, audit service.Audit) error {
-	action := actionCreate
-	if _, err := etcdx.Client().GetShared(ctx, key); err == nil {
-		action = actionUpdate
-	}
-	if err := etcdx.Client().PutShared(ctx, key, content); err != nil {
-		return err
-	}
-	s.recordHistory(ctx, fullKey("shared", key), content, action, audit)
-	return nil
+	return s.putConfig(ctx, "shared", key, content, audit)
 }
 
 func (s *sConfig) DeleteShared(ctx context.Context, key string, audit service.Audit) error {
@@ -117,14 +110,39 @@ func (s *sConfig) GetService(ctx context.Context, name string) (*v1.ConfigItem, 
 }
 
 func (s *sConfig) PutService(ctx context.Context, name, content string, audit service.Audit) error {
-	action := actionCreate
-	if _, err := etcdx.Client().GetService(ctx, name); err == nil {
-		action = actionUpdate
+	return s.putConfig(ctx, "services", name, content, audit)
+}
+
+func (s *sConfig) putConfig(ctx context.Context, kind, name, content string, audit service.Audit) error {
+	client := etcdx.Client()
+	prev := ""
+	exists := false
+	if kind == "services" {
+		if item, err := client.GetService(ctx, name); err == nil {
+			exists, prev = true, item.Content
+		}
+	} else if item, err := client.GetShared(ctx, name); err == nil {
+		exists, prev = true, item.Content
 	}
-	if err := etcdx.Client().PutService(ctx, name, content); err != nil {
+	if exists && prev == content {
+		return nil
+	}
+	var err error
+	if kind == "services" {
+		err = client.PutService(ctx, name, content)
+	} else {
+		err = client.PutShared(ctx, name, content)
+	}
+	if err != nil {
 		return err
 	}
-	s.recordHistory(ctx, fullKey("services", name), content, action, audit)
+	fk := fullKey(kind, name)
+	if !exists {
+		s.recordHistory(ctx, fk, content, actionCreate, audit)
+		return nil
+	}
+	s.ensureBaseline(ctx, fk, prev, audit)
+	s.recordHistory(ctx, fk, content, actionUpdate, audit)
 	return nil
 }
 
@@ -197,10 +215,19 @@ func (s *sConfig) seedGroup(ctx context.Context, dir, kind string, force bool, a
 		content := string(raw)
 		fk := fullKey(kind, key)
 		if force {
+			prev := ""
+			if item, gerr := client.Get(ctx, fk); gerr == nil {
+				prev = item.Content
+			}
 			if err = client.Put(ctx, fk, content); err != nil {
 				return written, err
 			}
-			s.recordHistory(ctx, fk, content, actionUpdate, audit)
+			if prev == "" {
+				s.recordHistory(ctx, fk, content, actionCreate, audit)
+			} else if prev != content {
+				s.ensureBaseline(ctx, fk, prev, audit)
+				s.recordHistory(ctx, fk, content, actionUpdate, audit)
+			}
 			written++
 			continue
 		}
@@ -257,6 +284,51 @@ func (s *sConfig) ListHistory(ctx context.Context, kind, key string) ([]v1.Histo
 	return list, nil
 }
 
+func shouldWriteBaseline(latestContent string, hasLatest bool, prev string) bool {
+	if strings.TrimSpace(prev) == "" {
+		return false
+	}
+	if hasLatest && latestContent == prev {
+		return false
+	}
+	return true
+}
+
+func (s *sConfig) latestHistory(ctx context.Context, configKey string) (*historyRow, error) {
+	var row historyRow
+	err := g.DB().Model("config_history").
+		Where("config_key", configKey).
+		OrderDesc("version").
+		Limit(1).
+		Scan(&row)
+	if err != nil {
+		return nil, err
+	}
+	if row.Id == 0 {
+		return nil, nil
+	}
+	return &row, nil
+}
+
+func (s *sConfig) ensureBaseline(ctx context.Context, configKey, prev string, audit service.Audit) {
+	latest, err := s.latestHistory(ctx, configKey)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取历史最新版本失败，仍尝试补录旧快照: %v", err)
+	}
+	hasLatest := latest != nil
+	latestContent := ""
+	if hasLatest {
+		latestContent = latest.Content
+	}
+	if !shouldWriteBaseline(latestContent, hasLatest, prev) {
+		return
+	}
+	s.recordHistory(ctx, configKey, prev, actionBaseline, service.Audit{
+		Operator: audit.Operator,
+		Remark:   "变更前快照",
+	})
+}
+
 func (s *sConfig) Rollback(ctx context.Context, kind, key string, version int, audit service.Audit) (int, error) {
 	fk := fullKey(kind, key)
 	var row historyRow
@@ -269,6 +341,9 @@ func (s *sConfig) Rollback(ctx context.Context, kind, key string, version int, a
 	}
 	if row.Id == 0 {
 		return 0, gerror.Newf("历史版本不存在: %s v%d", fk, version)
+	}
+	if cur, gerr := etcdx.Client().Get(ctx, fk); gerr == nil && cur.Content == row.Content {
+		return 0, gerror.New("该版本已是当前配置，请选择更早的历史版本")
 	}
 	if err = etcdx.Client().Put(ctx, fk, row.Content); err != nil {
 		return 0, err

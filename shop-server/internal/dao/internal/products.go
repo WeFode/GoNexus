@@ -11,7 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-// ProductsDao is the data access object for the table products.
+// ProductsDao is the data access object for the table PRODUCTS.
 type ProductsDao struct {
 	table    string             // table is the underlying table name of the DAO.
 	group    string             // group is the database configuration group name of the current DAO.
@@ -19,35 +19,35 @@ type ProductsDao struct {
 	handlers []gdb.ModelHandler // handlers for customized model modification.
 }
 
-// ProductsColumns defines and stores column names for the table products.
+// ProductsColumns defines and stores column names for the table PRODUCTS.
 type ProductsColumns struct {
 	Id          string //
-	Name        string // 商品名称
-	Description string // 商品描述
-	Price       string // 价格
-	Stock       string // 库存
-	Status      string // 状态：1上架 0下架
+	Name        string //
+	Description string //
+	Price       string //
+	Stock       string //
+	Status      string //
 	CreatedAt   string //
 	UpdatedAt   string //
 }
 
-// productsColumns holds the columns for the table products.
+// productsColumns holds the columns for the table PRODUCTS.
 var productsColumns = ProductsColumns{
-	Id:          "id",
-	Name:        "name",
-	Description: "description",
-	Price:       "price",
-	Stock:       "stock",
-	Status:      "status",
-	CreatedAt:   "created_at",
-	UpdatedAt:   "updated_at",
+	Id:          "ID",
+	Name:        "NAME",
+	Description: "DESCRIPTION",
+	Price:       "PRICE",
+	Stock:       "STOCK",
+	Status:      "STATUS",
+	CreatedAt:   "CREATED_AT",
+	UpdatedAt:   "UPDATED_AT",
 }
 
 // NewProductsDao creates and returns a new DAO object for table data access.
 func NewProductsDao(handlers ...gdb.ModelHandler) *ProductsDao {
 	return &ProductsDao{
 		group:    "default",
-		table:    "products",
+		table:    "PRODUCTS",
 		columns:  productsColumns,
 		handlers: handlers,
 	}

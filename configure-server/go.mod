@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	configure-center/pkg/etcdcfg v0.0.0
+	github.com/gogf/gf/contrib/drivers/dm/v2 v2.9.3
 	github.com/gogf/gf/contrib/drivers/pgsql/v2 v2.9.3
 	github.com/gogf/gf/v2 v2.9.3
 	github.com/golang-jwt/jwt/v5 v5.2.2
@@ -11,6 +12,7 @@ require (
 )
 
 require (
+	gitee.com/chunanyong/dm v1.8.12 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
@@ -22,6 +24,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/golang/snappy v0.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grokify/html-strip-tags-go v0.1.0 // indirect

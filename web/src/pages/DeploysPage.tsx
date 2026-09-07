@@ -1,4 +1,4 @@
-import { Alert, App, Button, Empty, Flex, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Button, Empty, Flex, Form, Input, InputNumber, Modal, Radio, Select, Space, Table, Tag, Typography, Upload } from 'antd'
 import type { TableProps } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
@@ -6,6 +6,7 @@ import {
   listArtifacts,
   listDeployJobs,
   listNodes,
+  promoteDeploy,
   rollbackDeploy,
   uploadArtifact,
   type ArtifactItem,
@@ -29,16 +30,27 @@ function guessMeta(name: string) {
   return { serviceName, imageName, platform, containerPort }
 }
 
+function statusColor(v: string) {
+  if (v === 'success') return 'success'
+  if (v === 'failed') return 'error'
+  if (v === 'waiting') return 'warning'
+  return 'processing'
+}
+
 export function DeploysPage() {
   const { message, modal } = App.useApp()
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [promoting, setPromoting] = useState(false)
   const [nodes, setNodes] = useState<NodeItem[]>([])
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([])
   const [jobs, setJobs] = useState<DeployJobItem[]>([])
-  const [nodeId, setNodeId] = useState<string>()
+  const [nodeIds, setNodeIds] = useState<string[]>([])
   const [artifactId, setArtifactId] = useState<number>()
   const [hostPort, setHostPort] = useState<number>()
+  const [strategy, setStrategy] = useState<'canary' | 'all'>('canary')
+  const [canaryCount, setCanaryCount] = useState(1)
+  const [canaryHostPort, setCanaryHostPort] = useState<number>()
   const [uploadOpen, setUploadOpen] = useState(false)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [form] = Form.useForm()
@@ -64,13 +76,45 @@ export function DeploysPage() {
   }, [reload])
 
   const online = nodes.filter((n) => n.online)
-  const selectedNode = nodes.find((n) => n.nodeId === nodeId)
+  const selectedNodes = nodes.filter((n) => nodeIds.includes(n.nodeId))
   const selectedArt = artifacts.find((a) => a.id === artifactId)
-  const platformMismatch = Boolean(
-    selectedNode?.dockerPlatform &&
-      selectedArt?.platform &&
-      selectedNode.dockerPlatform !== selectedArt.platform.replace('x86_64', 'amd64'),
+  const platformMismatch = selectedNodes.some(
+    (n) =>
+      Boolean(
+        n.dockerPlatform &&
+          selectedArt?.platform &&
+          n.dockerPlatform !== selectedArt.platform.replace('x86_64', 'amd64'),
+      ),
   )
+  const sidecar = strategy === 'canary' && nodeIds.length === 1 && Boolean(canaryHostPort)
+  const waitingJobs = jobs.filter((j) => j.status === 'waiting')
+  const waitingByArtifact = useMemo(() => {
+    const map = new Map<number, DeployJobItem[]>()
+    for (const j of waitingJobs) {
+      const list = map.get(j.artifactId) ?? []
+      list.push(j)
+      map.set(j.artifactId, list)
+    }
+    return [...map.entries()]
+  }, [waitingJobs])
+  const sidecarReady = useMemo(() => {
+    const seen = new Set<number>()
+    const out: DeployJobItem[] = []
+    for (const j of jobs) {
+      if (j.action !== 'canary' || j.status !== 'success') continue
+      if (jobs.some((x) => x.action === 'stop-canary' && x.artifactId === j.artifactId && x.id > j.id && x.status !== 'failed')) {
+        continue
+      }
+      if (jobs.some((x) => x.action === 'deploy' && x.artifactId === j.artifactId && x.nodeId === j.nodeId && x.id > j.id && x.status === 'success')) {
+        continue
+      }
+      if (jobs.some((x) => x.status === 'waiting' && x.artifactId === j.artifactId)) continue
+      if (seen.has(j.artifactId)) continue
+      seen.add(j.artifactId)
+      out.push(j)
+    }
+    return out
+  }, [jobs])
 
   const onPickTar = (file: File) => {
     setPendingFile(file)
@@ -97,18 +141,38 @@ export function DeploysPage() {
   }
 
   const onDeploy = () => {
-    if (!nodeId || !artifactId) {
+    if (nodeIds.length === 0 || !artifactId) {
       message.warning('请选择在线节点和产物')
+      return
+    }
+    if (sidecar && canaryHostPort === (hostPort || selectedArt?.containerPort)) {
+      message.warning('灰度端口不能与主端口相同')
       return
     }
     const art = artifacts.find((a) => a.id === artifactId)
     const port = hostPort || art?.containerPort || 8000
+    const names = nodeIds.join(', ')
+    let content = `镜像 ${art?.imageName}，主端口 ${port}。`
+    if (strategy === 'all') {
+      content += `将同时替换 ${nodeIds.length} 台节点上的主容器。`
+    } else if (sidecar) {
+      content += `旧容器不中断；新版本以 cc-${art?.serviceName}-canary 监听 ${canaryHostPort}。确认后再点「转正」。`
+    } else {
+      content += `先发前 ${Math.min(canaryCount, nodeIds.length)} 台，其余等待推进。`
+    }
     modal.confirm({
-      title: `发布 ${art?.serviceName} 到 ${nodeId}？`,
-      content: `镜像 ${art?.imageName}，宿主机端口 ${port}。只发一台即灰度；确认无误后再发其它节点。`,
+      title: `发布 ${art?.serviceName} 到 ${names}？`,
+      content,
       okText: '发布',
       onOk: async () => {
-        const res = await createDeploy([nodeId], artifactId, hostPort)
+        const res = await createDeploy({
+          nodeIds,
+          artifactId,
+          hostPort,
+          strategy,
+          canaryCount,
+          canaryHostPort: sidecar ? canaryHostPort : undefined,
+        })
         message.success(`已下发任务 ${res.jobIds.join(',')}`)
         await reload()
       },
@@ -124,6 +188,24 @@ export function DeploysPage() {
         const res = await rollbackDeploy(row.nodeId, row.serviceName)
         message.success(`已下发回滚任务 ${res.jobId}`)
         await reload()
+      },
+    })
+  }
+
+  const onPromote = (artifactId: number, title: string, content: string) => {
+    modal.confirm({
+      title,
+      content,
+      okText: '推进',
+      onOk: async () => {
+        setPromoting(true)
+        try {
+          const res = await promoteDeploy(artifactId)
+          message.success(`已推进 ${res.jobIds.join(',')}`)
+          await reload()
+        } finally {
+          setPromoting(false)
+        }
       },
     })
   }
@@ -147,15 +229,12 @@ export function DeploysPage() {
     { title: '任务', dataIndex: 'id', width: 70 },
     { title: '节点', dataIndex: 'nodeId', width: 120 },
     { title: '服务', dataIndex: 'serviceName', width: 140 },
-    { title: '动作', dataIndex: 'action', width: 90 },
+    { title: '动作', dataIndex: 'action', width: 110 },
     {
       title: '状态',
       dataIndex: 'status',
       width: 110,
-      render: (v: string) => {
-        const color = v === 'success' ? 'success' : v === 'failed' ? 'error' : 'processing'
-        return <Tag color={color}>{v}</Tag>
-      },
+      render: (v: string) => <Tag color={statusColor(v)}>{v}</Tag>,
     },
     { title: '说明', dataIndex: 'message', ellipsis: true },
     { title: '操作人', dataIndex: 'operator', width: 90 },
@@ -165,7 +244,7 @@ export function DeploysPage() {
       key: 'rb',
       width: 80,
       render: (_, row) =>
-        row.status === 'success' && row.action !== 'stop' ? (
+        row.status === 'success' && (row.action === 'deploy' || row.action === 'rollback') ? (
           <Button type="link" size="small" danger onClick={() => onRollback(row)}>
             回滚
           </Button>
@@ -186,7 +265,7 @@ export function DeploysPage() {
     <>
       <PageHeader
         title="发布"
-        description="上传 package.ps1 打出的 tar，选在线节点发布。配置热更新仍走 etcd，与换镜像相互独立。"
+        description="上传 package.ps1 打出的 tar。灰度：多节点先发金丝雀再推进；单节点用旁路端口跑 canary，旧容器不中断。配置热更新仍走 etcd。"
         extra={
           <Button onClick={() => void reload()} loading={loading}>
             刷新
@@ -211,15 +290,60 @@ export function DeploysPage() {
           description="请用 .\package.ps1 -Platform linux/arm64（或 amd64）重新打包后再发。"
         />
       ) : null}
+      {waitingByArtifact.map(([id, list]) => (
+        <Alert
+          key={`w-${id}`}
+          className="mb-4"
+          type="info"
+          showIcon
+          message={`产物 #${id} 灰度进行中`}
+          description={`${list.length} 台节点等待推进。确认金丝雀节点正常后再发布其余节点。`}
+          action={
+            <Button
+              type="primary"
+              size="small"
+              loading={promoting}
+              onClick={() =>
+                onPromote(id, '推进其余节点？', '等待中的任务将变为 pending，由各节点 Agent 拉取执行。')
+              }
+            >
+              推进其余节点
+            </Button>
+          }
+        />
+      ))}
+      {sidecarReady.map((j) => (
+        <Alert
+          key={`c-${j.id}`}
+          className="mb-4"
+          type="success"
+          showIcon
+          message={`产物 #${j.artifactId} 旁路灰度已运行`}
+          description={`${j.serviceName} @ ${j.nodeId} 的 canary 容器在端口 ${j.hostPort}。转正会替换主容器并下线 canary。`}
+          action={
+            <Button
+              type="primary"
+              size="small"
+              loading={promoting}
+              onClick={() =>
+                onPromote(j.artifactId, '转正旁路灰度？', '将把该产物发布为主容器，并删除 cc-*-canary。')
+              }
+            >
+              转正
+            </Button>
+          }
+        />
+      ))}
       <Flex gap={8} wrap="wrap" className="mb-4" align="center">
         <Upload beforeUpload={onPickTar} showUploadList={false} accept=".tar">
           <Button type="primary">上传 tar</Button>
         </Upload>
         <Select
-          placeholder="在线节点"
-          style={{ width: 220 }}
-          value={nodeId}
-          onChange={setNodeId}
+          mode="multiple"
+          placeholder="在线节点（可多选）"
+          style={{ minWidth: 260 }}
+          value={nodeIds}
+          onChange={setNodeIds}
           options={nodeOptions}
           notFoundContent="无在线节点"
         />
@@ -239,13 +363,46 @@ export function DeploysPage() {
         />
         <InputNumber
           style={{ width: 140 }}
-          placeholder="宿主机端口"
+          placeholder="主端口"
           min={1}
           value={hostPort}
           onChange={(v) => setHostPort(v ?? undefined)}
         />
-        <Button type="primary" onClick={onDeploy} disabled={!nodeId || !artifactId || platformMismatch}>
-          发布到该节点
+        <Radio.Group
+          value={strategy}
+          onChange={(e) => setStrategy(e.target.value)}
+          optionType="button"
+          options={[
+            { value: 'canary', label: '灰度' },
+            { value: 'all', label: '全量' },
+          ]}
+        />
+        {strategy === 'canary' && nodeIds.length > 1 ? (
+          <InputNumber
+            style={{ width: 130 }}
+            min={1}
+            max={nodeIds.length}
+            value={canaryCount}
+            onChange={(v) => setCanaryCount(v || 1)}
+            addonBefore="先发"
+            addonAfter="台"
+          />
+        ) : null}
+        {strategy === 'canary' && nodeIds.length <= 1 ? (
+          <InputNumber
+            style={{ width: 180 }}
+            placeholder="灰度端口（可选）"
+            min={1}
+            value={canaryHostPort}
+            onChange={(v) => setCanaryHostPort(v ?? undefined)}
+          />
+        ) : null}
+        <Button
+          type="primary"
+          onClick={onDeploy}
+          disabled={nodeIds.length === 0 || !artifactId || platformMismatch}
+        >
+          {strategy === 'all' ? '全量发布' : '灰度发布'}
         </Button>
       </Flex>
       <Typography.Title level={5}>产物</Typography.Title>

@@ -1,6 +1,6 @@
 import { App, Button, Col, Drawer, Flex, Row, Table, Tag, Typography } from 'antd'
 import type { TableProps } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { listHistory, rollbackConfig, type HistoryItem } from '../api/config'
 import { YamlEditor } from './YamlEditor'
 
@@ -11,6 +11,14 @@ interface Props {
   open: boolean
   onClose: () => void
   onRolledBack: () => void
+}
+
+const actionColor: Record<string, string> = {
+  CREATE: 'blue',
+  UPDATE: 'processing',
+  BASELINE: 'gold',
+  DELETE: 'red',
+  ROLLBACK: 'green',
 }
 
 export function HistoryDrawer({ kind, configKey, current, open, onClose, onRolledBack }: Props) {
@@ -26,16 +34,23 @@ export function HistoryDrawer({ kind, configKey, current, open, onClose, onRolle
     void listHistory(kind, configKey)
       .then((list) => {
         setRows(list)
-        setSelected(list[0] ?? null)
+        const prev = list.find((r) => r.content !== current)
+        setSelected(prev ?? list[0] ?? null)
       })
       .catch((e: unknown) => message.error(e instanceof Error ? e.message : '加载历史失败'))
       .finally(() => setLoading(false))
-  }, [open, kind, configKey, message])
+  }, [open, kind, configKey, current, message])
+
+  const previous = useMemo(() => rows.find((r) => r.content !== current), [rows, current])
 
   const onRollback = (row: HistoryItem) => {
+    if (row.content === current) {
+      message.warning('该版本已是当前配置')
+      return
+    }
     modal.confirm({
       title: `回滚到版本 ${row.version}？`,
-      content: '将作为一次新发布写入 etcd，不会删除历史。',
+      content: '将把该版本 YAML 作为一次新发布写入 etcd。历史记录保留，不会覆盖或删除旧行。',
       okText: '回滚',
       onOk: async () => {
         const res = await rollbackConfig(kind, configKey, row.version, {
@@ -52,8 +67,8 @@ export function HistoryDrawer({ kind, configKey, current, open, onClose, onRolle
     {
       title: '操作',
       dataIndex: 'actionType',
-      width: 100,
-      render: (v: string) => <Tag>{v}</Tag>,
+      width: 110,
+      render: (v: string) => <Tag color={actionColor[v] || 'default'}>{v}</Tag>,
     },
     { title: '操作人', dataIndex: 'operator', width: 100, ellipsis: true },
     { title: '说明', dataIndex: 'remark', ellipsis: true },
@@ -62,16 +77,34 @@ export function HistoryDrawer({ kind, configKey, current, open, onClose, onRolle
       title: '',
       key: 'rb',
       width: 80,
-      render: (_, row) => (
-        <Button type="link" size="small" onClick={() => onRollback(row)}>
-          回滚
-        </Button>
-      ),
+      render: (_, row) =>
+        row.content === current ? (
+          <Typography.Text type="secondary">当前</Typography.Text>
+        ) : (
+          <Button type="link" size="small" onClick={() => onRollback(row)}>
+            回滚
+          </Button>
+        ),
     },
   ]
 
   return (
-    <Drawer title={`历史 · ${configKey}`} open={open} onClose={onClose} size={960}>
+    <Drawer
+      title={`历史 · ${configKey}`}
+      open={open}
+      onClose={onClose}
+      size={960}
+      extra={
+        previous ? (
+          <Button type="primary" onClick={() => onRollback(previous)}>
+            回滚到上一版
+          </Button>
+        ) : null
+      }
+    >
+      <Typography.Paragraph type="secondary">
+        每次保存都会把<strong>修改前</strong>的 YAML 补进历史（若尚不存在），再追加新版本。回滚是一次新发布，不会删掉任何历史行。
+      </Typography.Paragraph>
       <Table<HistoryItem>
         rowKey="id"
         loading={loading}
