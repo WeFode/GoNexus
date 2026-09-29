@@ -202,7 +202,7 @@ s.Group("/api/v1", func(group *ghttp.RouterGroup) {
 
 本仓库目前没有网关进程；`shop-server` 不会自己按白名单把流量分给另一份自己。白名单配置给 **gateway-server**（统一入口）读，不要写在业务服务里。
 
-节点页可对已发布容器 **启动 / 停止 / 重启**（Agent 调 `docker start/stop/restart`）。心跳会带上容器 CPU/内存（`docker stats`），便于看是否还活着；QPS/延迟仍应走 Prometheus，不必做进配置中心。
+节点页可对已发布容器 **启动 / 停止 / 重启**（Agent 调 `docker start/stop/restart`）。心跳会上报整机 CPU 占用和已用内存，以及本中心容器的 `docker stats`。发布页选定产物后，按剩余内存和 CPU 推荐一台节点并写明原因，确认后再一键下发，不会自动部署。QPS/延迟仍应走 Prometheus。
 
 回滚会把该节点上一成功产物重新发布。配置热更新仍走 etcd Watch，与镜像发布相互独立。
 

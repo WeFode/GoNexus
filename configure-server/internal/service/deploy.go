@@ -22,6 +22,7 @@ type IDeploy interface {
 	Heartbeat(ctx context.Context, in *v1.HeartbeatReq) ([]v1.JobItem, error)
 	ReportJob(ctx context.Context, id int64, status, message string) error
 	ListNodes(ctx context.Context) ([]v1.NodeItem, error)
+	Recommend(ctx context.Context, artifactID int64, hostPort int) (*v1.RecommendRes, error)
 	ListArtifacts(ctx context.Context, serviceName string) ([]v1.ArtifactItem, error)
 	SaveArtifact(ctx context.Context, meta v1.ArtifactItem, r io.Reader) (*v1.ArtifactItem, error)
 	CreateDeploy(ctx context.Context, in DeployRequest) ([]int64, error)

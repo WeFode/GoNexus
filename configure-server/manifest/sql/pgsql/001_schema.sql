@@ -28,13 +28,21 @@ CREATE TABLE IF NOT EXISTS deploy_nodes (
     docker_platform  VARCHAR(64)  NOT NULL DEFAULT '',
     docker_network   VARCHAR(128) NOT NULL DEFAULT '',
     loopback_as      VARCHAR(128) NOT NULL DEFAULT '',
-    ncpu             INT          NOT NULL DEFAULT 0,
-    memory_bytes     BIGINT       NOT NULL DEFAULT 0,
-    agent_version    VARCHAR(32)  NOT NULL DEFAULT '',
-    containers       TEXT         NOT NULL DEFAULT '[]',
-    last_seen        TIMESTAMPTZ
+    ncpu              INT              NOT NULL DEFAULT 0,
+    memory_bytes      BIGINT           NOT NULL DEFAULT 0,
+    cpu_used_percent  DOUBLE PRECISION NOT NULL DEFAULT -1,
+    memory_used_bytes BIGINT           NOT NULL DEFAULT -1,
+    memory_source     VARCHAR(16)      NOT NULL DEFAULT '',
+    host_ports        TEXT             NOT NULL DEFAULT '[]',
+    agent_version     VARCHAR(32)      NOT NULL DEFAULT '',
+    containers        TEXT             NOT NULL DEFAULT '[]',
+    last_seen         TIMESTAMPTZ
 );
 COMMENT ON TABLE deploy_nodes IS 'deploy-agent 心跳；last_seen 用于在线判定';
+COMMENT ON COLUMN deploy_nodes.cpu_used_percent IS '整机 CPU 占用百分比；-1 表示未上报';
+COMMENT ON COLUMN deploy_nodes.memory_used_bytes IS '已用内存字节；-1 表示未上报';
+COMMENT ON COLUMN deploy_nodes.memory_source IS 'host=整机内存，containers=仅容器内存合计';
+COMMENT ON COLUMN deploy_nodes.host_ports IS '运行中容器已发布的宿主机端口，JSON 数组';
 
 CREATE TABLE IF NOT EXISTS deploy_artifacts (
     id              BIGSERIAL PRIMARY KEY,

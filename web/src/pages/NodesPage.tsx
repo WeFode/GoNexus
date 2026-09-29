@@ -4,9 +4,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { lifecycleDeploy, listNodes, type ContainerInfo, type NodeItem } from '../api/deploy'
 import { PageHeader } from '../components/PageHeader'
 
-function mem(n: number) {
-  if (!n) return '-'
-  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`
+function mem(used: number | undefined, total: number) {
+  if (!total) return '-'
+  const totalGB = (total / 1024 / 1024 / 1024).toFixed(1)
+  if (used == null || used < 0) return `— / ${totalGB} GB`
+  const usedGB = (used / 1024 / 1024 / 1024).toFixed(1)
+  return `${usedGB} / ${totalGB} GB`
 }
 
 function isUp(status: string) {
@@ -74,8 +77,12 @@ export function NodesPage() {
     },
     { title: 'OS', width: 110, render: (_, r) => `${r.os}/${r.arch}` },
     { title: 'Docker', dataIndex: 'dockerPlatform', width: 130 },
-    { title: 'CPU', dataIndex: 'ncpu', width: 70 },
-    { title: '内存', dataIndex: 'memoryBytes', width: 90, render: mem },
+    {
+      title: 'CPU',
+      width: 120,
+      render: (_, r) => (r.cpuUsedPercent == null || r.cpuUsedPercent < 0 ? `${r.ncpu} 核` : `${Math.round(r.cpuUsedPercent)}% · ${r.ncpu} 核`),
+    },
+    { title: '内存', width: 140, render: (_, r) => mem(r.memoryUsedBytes, r.memoryBytes) },
     { title: '心跳', dataIndex: 'lastSeen', width: 180 },
     { title: 'Agent', dataIndex: 'agentVersion', width: 80 },
   ]
@@ -84,7 +91,7 @@ export function NodesPage() {
     <>
       <PageHeader
         title="节点"
-        description="每台机器一个 deploy-agent。展开行可看本中心容器（cc-<服务名>）的状态与 CPU/内存，并下发启动/停止/重启。"
+        description="每台机器一个 deploy-agent。CPU、内存是整机占用；展开行可看本中心容器，并下发启动/停止/重启。"
         extra={
           <Button onClick={() => void reload()} loading={loading}>
             刷新

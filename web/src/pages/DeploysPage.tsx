@@ -14,6 +14,7 @@ import {
   type NodeItem,
 } from '../api/deploy'
 import { PageHeader } from '../components/PageHeader'
+import { RecommendPanel } from '../components/RecommendPanel'
 
 function guessMeta(name: string) {
   let serviceName = 'shop-server'
@@ -86,7 +87,6 @@ export function DeploysPage() {
           n.dockerPlatform !== selectedArt.platform.replace('x86_64', 'amd64'),
       ),
   )
-  const sidecar = strategy === 'canary' && nodeIds.length === 1 && Boolean(canaryHostPort)
   const waitingJobs = jobs.filter((j) => j.status === 'waiting')
   const waitingByArtifact = useMemo(() => {
     const map = new Map<number, DeployJobItem[]>()
@@ -140,25 +140,41 @@ export function DeploysPage() {
     }
   }
 
-  const onDeploy = () => {
-    if (nodeIds.length === 0 || !artifactId) {
+  const confirmDeploy = (ids: string[], remark?: string) => {
+    if (ids.length === 0 || !artifactId) {
       message.warning('请选择在线节点和产物')
       return
     }
-    if (sidecar && canaryHostPort === (hostPort || selectedArt?.containerPort)) {
+    const targets = nodes.filter((n) => ids.includes(n.nodeId))
+    const mismatch = targets.some(
+      (n) =>
+        Boolean(
+          n.dockerPlatform &&
+            selectedArt?.platform &&
+            n.dockerPlatform !== selectedArt.platform.replace('x86_64', 'amd64'),
+        ),
+    )
+    if (mismatch) {
+      message.error('产物平台与节点 Docker 架构不一致')
+      return
+    }
+    const sidecarNow = strategy === 'canary' && ids.length === 1 && Boolean(canaryHostPort)
+    if (sidecarNow && canaryHostPort === (hostPort || selectedArt?.containerPort)) {
       message.warning('灰度端口不能与主端口相同')
       return
     }
     const art = artifacts.find((a) => a.id === artifactId)
     const port = hostPort || art?.containerPort || 8000
-    const names = nodeIds.join(', ')
+    const names = ids.join(', ')
     let content = `镜像 ${art?.imageName}，主端口 ${port}。`
     if (strategy === 'all') {
-      content += `将同时替换 ${nodeIds.length} 台节点上的主容器。`
-    } else if (sidecar) {
+      content += `将同时替换 ${ids.length} 台节点上的主容器。`
+    } else if (sidecarNow) {
       content += `旧容器不中断；新版本以 cc-${art?.serviceName}-canary 监听 ${canaryHostPort}。确认后再点「转正」。`
+    } else if (ids.length === 1) {
+      content += '只下发到这一台，由该节点 Agent 拉取执行。'
     } else {
-      content += `先发前 ${Math.min(canaryCount, nodeIds.length)} 台，其余等待推进。`
+      content += `先发前 ${Math.min(canaryCount, ids.length)} 台，其余等待推进。`
     }
     modal.confirm({
       title: `发布 ${art?.serviceName} 到 ${names}？`,
@@ -166,13 +182,15 @@ export function DeploysPage() {
       okText: '发布',
       onOk: async () => {
         const res = await createDeploy({
-          nodeIds,
+          nodeIds: ids,
           artifactId,
           hostPort,
+          remark,
           strategy,
           canaryCount,
-          canaryHostPort: sidecar ? canaryHostPort : undefined,
+          canaryHostPort: sidecarNow ? canaryHostPort : undefined,
         })
+        setNodeIds(ids)
         message.success(`已下发任务 ${res.jobIds.join(',')}`)
         await reload()
       },
@@ -265,7 +283,7 @@ export function DeploysPage() {
     <>
       <PageHeader
         title="发布"
-        description="上传 package.ps1 打出的 tar。灰度：多节点先发金丝雀再推进；单节点用旁路端口跑 canary，旧容器不中断。配置热更新仍走 etcd。"
+        description="上传 tar 后，按剩余内存和 CPU 推荐一台节点，确认再下发。也可手动多选做灰度或全量。配置热更新仍走 etcd。"
         extra={
           <Button onClick={() => void reload()} loading={loading}>
             刷新
@@ -277,7 +295,7 @@ export function DeploysPage() {
           className="mb-4"
           type="warning"
           showIcon
-          message="没有在线节点"
+          title="没有在线节点"
           description="在目标机器执行 cd deploy-agent && go run .（Linux 同样）。节点上线后才能发布，无需 SSH 拷 tar。"
         />
       ) : null}
@@ -286,7 +304,7 @@ export function DeploysPage() {
           className="mb-4"
           type="error"
           showIcon
-          message="产物平台与节点 Docker 架构不一致"
+          title="产物平台与节点 Docker 架构不一致"
           description="请用 .\package.ps1 -Platform linux/arm64（或 amd64）重新打包后再发。"
         />
       ) : null}
@@ -296,7 +314,7 @@ export function DeploysPage() {
           className="mb-4"
           type="info"
           showIcon
-          message={`产物 #${id} 灰度进行中`}
+          title={`产物 #${id} 灰度进行中`}
           description={`${list.length} 台节点等待推进。确认金丝雀节点正常后再发布其余节点。`}
           action={
             <Button
@@ -318,7 +336,7 @@ export function DeploysPage() {
           className="mb-4"
           type="success"
           showIcon
-          message={`产物 #${j.artifactId} 旁路灰度已运行`}
+          title={`产物 #${j.artifactId} 旁路灰度已运行`}
           description={`${j.serviceName} @ ${j.nodeId} 的 canary 容器在端口 ${j.hostPort}。转正会替换主容器并下线 canary。`}
           action={
             <Button
@@ -334,7 +352,7 @@ export function DeploysPage() {
           }
         />
       ))}
-      <Flex gap={8} wrap="wrap" className="mb-4" align="center">
+      <Flex gap={8} wrap="wrap" style={{ marginBottom: 12, marginTop: 12 }} align="center">
         <Upload beforeUpload={onPickTar} showUploadList={false} accept=".tar">
           <Button type="primary">上传 tar</Button>
         </Upload>
@@ -399,12 +417,13 @@ export function DeploysPage() {
         ) : null}
         <Button
           type="primary"
-          onClick={onDeploy}
+          onClick={() => confirmDeploy(nodeIds)}
           disabled={nodeIds.length === 0 || !artifactId || platformMismatch}
         >
           {strategy === 'all' ? '全量发布' : '灰度发布'}
         </Button>
       </Flex>
+      <RecommendPanel artifactId={artifactId} hostPort={hostPort} onDeploy={confirmDeploy} />
       <Typography.Title level={5}>产物</Typography.Title>
       <Table<ArtifactItem>
         rowKey="id"

@@ -47,20 +47,25 @@ func (s *sDeploy) Heartbeat(ctx context.Context, in *v1.HeartbeatReq) ([]v1.JobI
 		}
 	}
 	raw, _ := json.Marshal(managed)
+	cpuUsed, memUsed, memSource, hostPorts := metricsOf(in)
 	now := gtime.Now()
 	data := g.Map{
-		"node_id":         in.NodeId,
-		"hostname":        in.Hostname,
-		"os":              in.OS,
-		"arch":            in.Arch,
-		"docker_platform": in.DockerPlatform,
-		"docker_network":  in.DockerNetwork,
-		"loopback_as":     in.LoopbackAs,
-		"ncpu":            in.Ncpu,
-		"memory_bytes":    in.MemoryBytes,
-		"agent_version":   in.AgentVersion,
-		"containers":      string(raw),
-		"last_seen":       now,
+		"node_id":           in.NodeId,
+		"hostname":          in.Hostname,
+		"os":                in.OS,
+		"arch":              in.Arch,
+		"docker_platform":   in.DockerPlatform,
+		"docker_network":    in.DockerNetwork,
+		"loopback_as":       in.LoopbackAs,
+		"ncpu":              in.Ncpu,
+		"memory_bytes":      in.MemoryBytes,
+		"cpu_used_percent":  cpuUsed,
+		"memory_used_bytes": memUsed,
+		"memory_source":     memSource,
+		"host_ports":        hostPorts,
+		"agent_version":     in.AgentVersion,
+		"containers":        string(raw),
+		"last_seen":         now,
 	}
 	n, err := g.DB().Model("deploy_nodes").Where("node_id", in.NodeId).Count()
 	if err != nil {
@@ -171,18 +176,22 @@ type artifactRow struct {
 }
 
 type nodeRow struct {
-	NodeId         string      `orm:"node_id"`
-	Hostname       string      `orm:"hostname"`
-	OS             string      `orm:"os"`
-	Arch           string      `orm:"arch"`
-	DockerPlatform string      `orm:"docker_platform"`
-	DockerNetwork  string      `orm:"docker_network"`
-	LoopbackAs     string      `orm:"loopback_as"`
-	Ncpu           int         `orm:"ncpu"`
-	MemoryBytes    int64       `orm:"memory_bytes"`
-	AgentVersion   string      `orm:"agent_version"`
-	Containers     string      `orm:"containers"`
-	LastSeen       *gtime.Time `orm:"last_seen"`
+	NodeId          string      `orm:"node_id"`
+	Hostname        string      `orm:"hostname"`
+	OS              string      `orm:"os"`
+	Arch            string      `orm:"arch"`
+	DockerPlatform  string      `orm:"docker_platform"`
+	DockerNetwork   string      `orm:"docker_network"`
+	LoopbackAs      string      `orm:"loopback_as"`
+	Ncpu            int         `orm:"ncpu"`
+	MemoryBytes     int64       `orm:"memory_bytes"`
+	CpuUsedPercent  float64     `orm:"cpu_used_percent"`
+	MemoryUsedBytes int64       `orm:"memory_used_bytes"`
+	MemorySource    string      `orm:"memory_source"`
+	HostPorts       string      `orm:"host_ports"`
+	AgentVersion    string      `orm:"agent_version"`
+	Containers      string      `orm:"containers"`
+	LastSeen        *gtime.Time `orm:"last_seen"`
 }
 
 func (s *sDeploy) artifactByID(ctx context.Context, id int64) (*artifactRow, error) {
@@ -236,17 +245,21 @@ func (s *sDeploy) ListNodes(ctx context.Context) ([]v1.NodeItem, error) {
 	out := make([]v1.NodeItem, 0, len(rows))
 	for _, row := range rows {
 		item := v1.NodeItem{
-			NodeId:         row.NodeId,
-			Hostname:       row.Hostname,
-			OS:             row.OS,
-			Arch:           row.Arch,
-			DockerPlatform: row.DockerPlatform,
-			DockerNetwork:  row.DockerNetwork,
-			LoopbackAs:     row.LoopbackAs,
-			Ncpu:           row.Ncpu,
-			MemoryBytes:    row.MemoryBytes,
-			AgentVersion:   row.AgentVersion,
-			Containers:     []v1.ContainerInfo{},
+			NodeId:          row.NodeId,
+			Hostname:        row.Hostname,
+			OS:              row.OS,
+			Arch:            row.Arch,
+			DockerPlatform:  row.DockerPlatform,
+			DockerNetwork:   row.DockerNetwork,
+			LoopbackAs:      row.LoopbackAs,
+			Ncpu:            row.Ncpu,
+			MemoryBytes:     row.MemoryBytes,
+			CpuUsedPercent:  row.CpuUsedPercent,
+			MemoryUsedBytes: row.MemoryUsedBytes,
+			MemorySource:    row.MemorySource,
+			HostPorts:       decodeHostPorts(row.HostPorts),
+			AgentVersion:    row.AgentVersion,
+			Containers:      []v1.ContainerInfo{},
 		}
 		if row.LastSeen != nil {
 			item.LastSeen = row.LastSeen.String()

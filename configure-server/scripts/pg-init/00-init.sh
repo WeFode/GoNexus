@@ -19,9 +19,9 @@ fi
 for f in /opt/sql/config-center/*.sql; do
   [ -e "$f" ] || continue
   case "$(basename "$f")" in
-    000_*) continue ;;
+    000_*|002_*) continue ;;
   esac
-  echo "    apply $(basename "$f")"
+  echo "    apply $(basename "$f") -> config_center"
   psql_cmd --dbname config_center -f "$f"
 done
 
@@ -29,9 +29,10 @@ echo "==> init app_db (shop-server)"
 if ! db_exists app_db; then
   psql_cmd --dbname postgres -c "CREATE DATABASE app_db;"
 fi
-for f in /opt/sql/shop/*.sql; do
+# 002_shop_schema.sql 与业务库在同一目录；/opt/sql/shop 仅兼容旧挂载。
+for f in /opt/sql/config-center/002_*.sql /opt/sql/shop/*.sql; do
   [ -e "$f" ] || continue
-  echo "    apply $(basename "$f")"
+  echo "    apply $(basename "$f") -> app_db"
   psql_cmd --dbname app_db -f "$f"
 done
 

@@ -12,6 +12,13 @@ type ContainerInfo struct {
 	MemPerc  string `json:"memPerc"`
 }
 
+type NodeMetrics struct {
+	CpuUsedPercent  float64 `json:"cpuUsedPercent"`
+	MemoryUsedBytes int64   `json:"memoryUsedBytes"`
+	MemorySource    string  `json:"memorySource"`
+	HostPorts       []int   `json:"hostPorts"`
+}
+
 type HeartbeatReq struct {
 	g.Meta         `path:"/agent/heartbeat" method:"post" tags:"Agent" summary:"节点心跳"`
 	NodeId         string          `json:"nodeId" v:"required"`
@@ -25,6 +32,7 @@ type HeartbeatReq struct {
 	MemoryBytes    int64           `json:"memoryBytes"`
 	AgentVersion   string          `json:"agentVersion"`
 	Containers     []ContainerInfo `json:"containers"`
+	Metrics        *NodeMetrics    `json:"metrics"`
 }
 
 type HeartbeatRes struct {
@@ -59,19 +67,55 @@ type ListNodesReq struct {
 }
 
 type NodeItem struct {
-	NodeId         string          `json:"nodeId"`
-	Hostname       string          `json:"hostname"`
-	OS             string          `json:"os"`
-	Arch           string          `json:"arch"`
-	DockerPlatform string          `json:"dockerPlatform"`
-	DockerNetwork  string          `json:"dockerNetwork"`
-	LoopbackAs     string          `json:"loopbackAs"`
-	Ncpu           int             `json:"ncpu"`
-	MemoryBytes    int64           `json:"memoryBytes"`
-	AgentVersion   string          `json:"agentVersion"`
-	Online         bool            `json:"online"`
-	LastSeen       string          `json:"lastSeen"`
-	Containers     []ContainerInfo `json:"containers"`
+	NodeId          string          `json:"nodeId"`
+	Hostname        string          `json:"hostname"`
+	OS              string          `json:"os"`
+	Arch            string          `json:"arch"`
+	DockerPlatform  string          `json:"dockerPlatform"`
+	DockerNetwork   string          `json:"dockerNetwork"`
+	LoopbackAs      string          `json:"loopbackAs"`
+	Ncpu            int             `json:"ncpu"`
+	MemoryBytes     int64           `json:"memoryBytes"`
+	CpuUsedPercent  float64         `json:"cpuUsedPercent"`
+	MemoryUsedBytes int64           `json:"memoryUsedBytes"`
+	MemorySource    string          `json:"memorySource"`
+	HostPorts       []int           `json:"hostPorts"`
+	AgentVersion    string          `json:"agentVersion"`
+	Online          bool            `json:"online"`
+	LastSeen        string          `json:"lastSeen"`
+	Containers      []ContainerInfo `json:"containers"`
+}
+
+type RecommendReq struct {
+	g.Meta     `path:"/nodes/recommend" method:"get" tags:"Deploy" summary:"按资源空闲推荐部署节点"`
+	ArtifactId int64 `json:"artifactId" v:"required" query:"artifactId"`
+	HostPort   int   `json:"hostPort" query:"hostPort"`
+}
+
+type RecommendNode struct {
+	NodeId          string  `json:"nodeId"`
+	Hostname        string  `json:"hostname"`
+	Online          bool    `json:"online"`
+	DockerPlatform  string  `json:"dockerPlatform"`
+	Ncpu            int     `json:"ncpu"`
+	MemoryBytes     int64   `json:"memoryBytes"`
+	MemoryUsedBytes int64   `json:"memoryUsedBytes"`
+	MemorySource    string  `json:"memorySource"`
+	CpuUsedPercent  float64 `json:"cpuUsedPercent"`
+	ContainerCount  int     `json:"containerCount"`
+	Eligible        bool    `json:"eligible"`
+	Recommended     bool    `json:"recommended"`
+	Score           int     `json:"score"`
+	Reason          string  `json:"reason"`
+}
+
+type RecommendRes struct {
+	ServiceName       string          `json:"serviceName"`
+	Platform          string          `json:"platform"`
+	HostPort          int             `json:"hostPort"`
+	RecommendedNodeId string          `json:"recommendedNodeId"`
+	Summary           string          `json:"summary"`
+	Nodes             []RecommendNode `json:"nodes"`
 }
 
 type ListNodesRes struct {

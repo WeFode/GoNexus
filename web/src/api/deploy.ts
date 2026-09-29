@@ -20,10 +20,40 @@ export interface NodeItem {
   loopbackAs: string
   ncpu: number
   memoryBytes: number
+  cpuUsedPercent?: number
+  memoryUsedBytes?: number
+  memorySource?: string
+  hostPorts?: number[]
   agentVersion: string
   online: boolean
   lastSeen: string
   containers: ContainerInfo[]
+}
+
+export interface RecommendNode {
+  nodeId: string
+  hostname: string
+  online: boolean
+  dockerPlatform: string
+  ncpu: number
+  memoryBytes: number
+  memoryUsedBytes: number
+  memorySource: string
+  cpuUsedPercent: number
+  containerCount: number
+  eligible: boolean
+  recommended: boolean
+  score: number
+  reason: string
+}
+
+export interface RecommendRes {
+  serviceName: string
+  platform: string
+  hostPort: number
+  recommendedNodeId: string
+  summary: string
+  nodes: RecommendNode[]
 }
 
 export interface ArtifactItem {
@@ -55,6 +85,12 @@ export interface DeployJobItem {
 
 export function listNodes() {
   return request<{ list: NodeItem[] }>('/api/v1/nodes').then((d) => d.list ?? [])
+}
+
+export function recommendNode(artifactId: number, hostPort?: number) {
+  const q = new URLSearchParams({ artifactId: String(artifactId) })
+  if (hostPort) q.set('hostPort', String(hostPort))
+  return request<RecommendRes>(`/api/v1/nodes/recommend?${q}`)
 }
 
 export function listArtifacts(serviceName?: string) {

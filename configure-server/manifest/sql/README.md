@@ -17,7 +17,7 @@
 cd configure-server
 make docker-up
 # 首次创建数据卷时 scripts/pg-init 会建 config_center 并执行 pgsql/*.sql
-# 同时执行 shop-server/manifest/sql 到 app_db
+# 其中 002_shop_schema.sql 写入 app_db，其余写入 config_center
 ```
 
 已有数据卷、需要补表时：
@@ -28,6 +28,14 @@ psql -U postgres -h 127.0.0.1 -p 5433 -d config_center -f manifest/sql/pgsql/001
 ```
 
 `000_create_database.sql` 在库已存在时会报错，可忽略后继续跑 `001_schema.sql`（`IF NOT EXISTS`）。
+
+已有库补节点 CPU/内存列（发布页推荐节点要用）：
+
+```powershell
+psql -U postgres -h 127.0.0.1 -p 5433 -d config_center -f manifest/sql/pgsql/003_node_metrics.sql
+```
+
+达梦已有库执行 `dm/003_node_metrics.sql`；列已存在时报错可忽略。
 
 连接串：
 

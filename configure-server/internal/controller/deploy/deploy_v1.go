@@ -47,6 +47,10 @@ func (c *ControllerV1) ListNodes(ctx context.Context, _ *v1.ListNodesReq) (*v1.L
 	return &v1.ListNodesRes{List: list}, nil
 }
 
+func (c *ControllerV1) Recommend(ctx context.Context, req *v1.RecommendReq) (*v1.RecommendRes, error) {
+	return service.Deploy().Recommend(ctx, req.ArtifactId, req.HostPort)
+}
+
 func (c *ControllerV1) ListArtifacts(ctx context.Context, req *v1.ListArtifactsReq) (*v1.ListArtifactsRes, error) {
 	list, err := service.Deploy().ListArtifacts(ctx, req.ServiceName)
 	if err != nil {

@@ -17,9 +17,10 @@ import (
 	"github.com/gogf/gf/v2/os/gctx"
 
 	"deploy-agent/internal/dockerx"
+	"deploy-agent/internal/hostmetrics"
 )
 
-const version = "0.2.1"
+const version = "0.3.0"
 
 type job struct {
 	Id            int64  `json:"id"`
@@ -83,6 +84,36 @@ func tick(ctx context.Context) error {
 			}
 		}
 	}
+	cpuUsed, memUsed, memSource := hostmetrics.Collect(mem)
+	if cpus, limit, used, cpuPct, qok := hostmetrics.Quota(); qok {
+		if cpus > 0 && (ncpu == 0 || cpus < ncpu) {
+			ncpu = cpus
+		}
+		if limit > 0 && (mem == 0 || limit < mem) {
+			mem = limit
+		}
+		if used >= 0 {
+			memUsed = used
+			memSource = "host"
+		}
+		if cpuPct >= 0 {
+			cpuUsed = cpuPct
+		}
+	}
+	if memUsed < 0 {
+		if used, uerr := dockerx.MemoryUsedBytes(); uerr == nil {
+			memUsed = used
+			memSource = "containers"
+		}
+	}
+	hostPorts, perr := dockerx.PublishedHostPorts()
+	if perr != nil {
+		g.Log().Warningf(ctx, "host ports: %v", perr)
+		hostPorts = []int{}
+	}
+	if hostPorts == nil {
+		hostPorts = []int{}
+	}
 	body := g.Map{
 		"nodeId":         g.Cfg().MustGet(ctx, "agent.nodeId").String(),
 		"hostname":       hostname(),
@@ -95,6 +126,12 @@ func tick(ctx context.Context) error {
 		"memoryBytes":    mem,
 		"agentVersion":   version,
 		"containers":     containers,
+		"metrics": g.Map{
+			"cpuUsedPercent":  cpuUsed,
+			"memoryUsedBytes": memUsed,
+			"memorySource":    memSource,
+			"hostPorts":       hostPorts,
+		},
 	}
 	var hb struct {
 		Code    int    `json:"code"`
