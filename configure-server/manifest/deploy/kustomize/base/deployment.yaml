@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: configure-server
+  labels:
+    app: configure-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: configure-server
+  template:
+    metadata:
+      labels:
+        app: configure-server
+    spec:
+      containers:
+        - name : main
+          image: configure-server
+          imagePullPolicy: Always

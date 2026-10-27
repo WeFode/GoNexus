@@ -1,0 +1,12 @@
+# 复制为 config.yaml。Linux 节点改 nodeId，arm64 机器无需改 Agent 源码。
+agent:
+  nodeId: "node-1"
+  server: "http://127.0.0.1:9000"
+  token: "dev-agent-token"
+  interval: "10s"
+  dockerNetwork: ""
+  loopbackAs: "host.docker.internal"
+  # 发布后健康探测：TCP + HTTP(healthPath)。失败自动回滚旧镜像。
+  healthTimeout: "90s"
+  healthInterval: "2s"
+  healthPath: "/api/v1/health"

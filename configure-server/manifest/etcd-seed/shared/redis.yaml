@@ -1,0 +1,4 @@
+redis:
+  default:
+    address: 127.0.0.1:6380
+    db: 0

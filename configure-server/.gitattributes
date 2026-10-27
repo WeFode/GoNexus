@@ -1,0 +1,2 @@
+* linguist-language=GO
+scripts/pg-init/*.sh text eol=lf

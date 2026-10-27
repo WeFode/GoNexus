@@ -1,0 +1,203 @@
+import { request } from './client'
+
+export interface ContainerInfo {
+  name: string
+  image: string
+  status: string
+  ports: string
+  cpuPerc?: string
+  memUsage?: string
+  memPerc?: string
+}
+
+export interface NodeItem {
+  nodeId: string
+  hostname: string
+  os: string
+  arch: string
+  dockerPlatform: string
+  dockerNetwork: string
+  loopbackAs: string
+  ncpu: number
+  memoryBytes: number
+  cpuUsedPercent?: number
+  memoryUsedBytes?: number
+  memorySource?: string
+  hostPorts?: number[]
+  agentVersion: string
+  online: boolean
+  lastSeen: string
+  containers: ContainerInfo[]
+}
+
+export interface RecommendNode {
+  nodeId: string
+  hostname: string
+  online: boolean
+  dockerPlatform: string
+  ncpu: number
+  memoryBytes: number
+  memoryUsedBytes: number
+  memorySource: string
+  cpuUsedPercent: number
+  containerCount: number
+  eligible: boolean
+  recommended: boolean
+  score: number
+  reason: string
+}
+
+export interface RecommendRes {
+  serviceName: string
+  platform: string
+  hostPort: number
+  recommendedNodeId: string
+  summary: string
+  nodes: RecommendNode[]
+}
+
+export interface ArtifactItem {
+  id: number
+  serviceName: string
+  imageName: string
+  platform: string
+  containerPort: number
+  fileSize: number
+  sha256: string
+  operator: string
+  createdAt: string
+}
+
+export interface DeployJobItem {
+  id: number
+  nodeId: string
+  artifactId: number
+  serviceName: string
+  action: string
+  status: string
+  imageName: string
+  hostPort: number
+  message: string
+  operator: string
+  createdAt: string
+  updatedAt: string
+}
+
+export function listNodes() {
+  return request<{ list: NodeItem[] }>('/api/v1/nodes').then((d) => d.list ?? [])
+}
+
+export function recommendNode(artifactId: number, hostPort?: number) {
+  const q = new URLSearchParams({ artifactId: String(artifactId) })
+  if (hostPort) q.set('hostPort', String(hostPort))
+  return request<RecommendRes>(`/api/v1/nodes/recommend?${q}`)
+}
+
+export function listArtifacts(serviceName?: string) {
+  const q = serviceName ? `?serviceName=${encodeURIComponent(serviceName)}` : ''
+  return request<{ list: ArtifactItem[] }>(`/api/v1/artifacts${q}`).then((d) => d.list ?? [])
+}
+
+export function uploadArtifact(file: File, meta: {
+  serviceName: string
+  imageName: string
+  platform: string
+  containerPort: number
+}) {
+  const body = new FormData()
+  body.append('file', file)
+  body.append('serviceName', meta.serviceName)
+  body.append('imageName', meta.imageName)
+  body.append('platform', meta.platform)
+  body.append('containerPort', String(meta.containerPort))
+  return request<ArtifactItem>('/api/v1/artifacts', { method: 'POST', body })
+}
+
+export function createDeploy(body: {
+  nodeIds: string[]
+  artifactId: number
+  hostPort?: number
+  remark?: string
+  strategy?: 'canary' | 'all'
+  canaryCount?: number
+  canaryHostPort?: number
+}) {
+  return request<{ jobIds: number[] }>('/api/v1/deploys', {
+    method: 'POST',
+    body: JSON.stringify({
+      nodeIds: body.nodeIds,
+      artifactId: body.artifactId,
+      hostPort: body.hostPort || 0,
+      remark: body.remark || '',
+      strategy: body.strategy || 'canary',
+      canaryCount: body.canaryCount || 1,
+      canaryHostPort: body.canaryHostPort || 0,
+    }),
+  })
+}
+
+export function rollbackDeploy(nodeId: string, serviceName: string, remark?: string) {
+  return request<{ jobId: number }>('/api/v1/deploys/rollback', {
+    method: 'POST',
+    body: JSON.stringify({ nodeId, serviceName, remark: remark || '' }),
+  })
+}
+
+export function promoteDeploy(artifactId: number, remark?: string) {
+  return request<{ jobIds: number[] }>('/api/v1/deploys/promote', {
+    method: 'POST',
+    body: JSON.stringify({ artifactId, remark: remark || '' }),
+  })
+}
+
+export function lifecycleDeploy(nodeId: string, serviceName: string, action: 'start' | 'stop' | 'restart') {
+  return request<{ jobId: number }>('/api/v1/deploys/lifecycle', {
+    method: 'POST',
+    body: JSON.stringify({ nodeId, serviceName, action }),
+  })
+}
+
+export function listDeployJobs(nodeId?: string) {
+  const q = nodeId ? `?nodeId=${encodeURIComponent(nodeId)}` : ''
+  return request<{ list: DeployJobItem[] }>(`/api/v1/deploys${q}`).then((d) => d.list ?? [])
+}
+
+/** 任务健康/回滚语义解析（与 deploy-agent 0.4.0 的 message 约定对应） */
+export interface JobSemantics {
+  healthOk: boolean
+  autoRolledBack: boolean
+  noPrevious: boolean
+}
+
+export function parseJobSemantics(job: DeployJobItem): JobSemantics {
+  const m = (job.message || '').toLowerCase()
+  return {
+    healthOk: m.includes('health ok'),
+    autoRolledBack: m.includes('rolled back') || m.includes('rollback also failed') || m.includes('also unhealthy'),
+    noPrevious: m.includes('no previous version'),
+  }
+}
+
+export function jobStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    pending: '执行中',
+    waiting: '灰度等待',
+    running: '执行中',
+    success: '成功',
+    failed: '失败',
+  }
+  return map[status] ?? status
+}
+
+export function actionLabel(action: string): string {
+  const map: Record<string, string> = {
+    deploy: '发布',
+    rollback: '回滚',
+    canary: '旁路灰度',
+    'stop-canary': '下线灰度',
+    start: '启动',
+    stop: '停止',
+    restart: '重启',
+  }
+  return map[action] ?? action
+}

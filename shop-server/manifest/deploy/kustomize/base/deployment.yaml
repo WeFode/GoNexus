@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-server
+  labels:
+    app: shop-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shop-server
+  template:
+    metadata:
+      labels:
+        app: shop-server
+    spec:
+      containers:
+        - name : main
+          image: shop-server
+          imagePullPolicy: Always

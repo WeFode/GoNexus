@@ -1,0 +1,78 @@
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.21
+    container_name: gf_etcd
+    restart: unless-stopped
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd0
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://127.0.0.1:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://127.0.0.1:2380
+      - --initial-cluster=etcd0=http://127.0.0.1:2380
+      - --initial-cluster-token=configure-center
+      - --initial-cluster-state=new
+    environment:
+      ETCDCTL_API: "3"
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    volumes:
+      - gf_etcd_data:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health", "--endpoints=http://127.0.0.1:2379"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - gf_net
+
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: gf_postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: app_db
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: "123456"
+  #     TZ: Asia/Shanghai
+  #   ports:
+  #     - "5433:5432"
+  #   volumes:
+  #     - gf_pg_data:/var/lib/postgresql/data
+  #     - ./scripts/pg-init:/docker-entrypoint-initdb.d:ro
+  #     - ./manifest/sql/pgsql:/opt/sql/config-center:ro
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres -d app_db"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
+  #   networks:
+  #     - gf_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: gf_redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - gf_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - gf_net
+
+networks:
+  gf_net:
+    driver: bridge
+
+volumes:
+  gf_etcd_data:
+  gf_pg_data:
+  gf_redis_data:

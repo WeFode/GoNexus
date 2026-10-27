@@ -1,0 +1,19 @@
+# 配置中心进程。镜像来自仓库根目录：
+#   .\package.ps1 -Platform linux/arm64
+# 服务器先 docker load，再在本目录执行：
+#   docker compose -f docker-compose.app.yml up -d --pull never
+#
+# network_mode: host 让 config.yaml 里的 127.0.0.1:2379 / :5433 / :6380
+# 直接打到 docker-compose.yml 发布在宿主机上的 etcd、Postgres、Redis。
+# 容器名不要用 cc- 前缀，否则会被 deploy-agent 当成业务容器上报。
+services:
+  configure-server:
+    image: configure-server:linux-arm64
+    pull_policy: never
+    container_name: configure-server
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./manifest/config/config.yaml:/app/manifest/config/config.yaml:ro
+      - ./manifest/etcd-seed:/app/manifest/etcd-seed:ro
+      - ./data/artifacts:/app/data/artifacts

@@ -1,0 +1,5 @@
+deploy/dist/*.tar
+deploy/dist/*.json
+!deploy/catalog.json
+# IMPLEMENTATION.md
+# optimize.md

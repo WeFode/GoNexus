@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shop-server-configmap
+data:
+  config.yaml: |
+    svc:
+      etcd:
+        host: "etcd:2379@shop-server"

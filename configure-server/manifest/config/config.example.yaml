@@ -1,0 +1,42 @@
+# 复制为 config.yaml 后按本机修改。
+
+server:
+  address:     ":9000"
+  openapiPath: "/api.json"
+  swaggerPath: "/swagger"
+  clientMaxBodySize: "512MB"
+
+logger:
+  level: "all"
+  stdout: true
+
+# 库表脚本：manifest/sql/pgsql（本地）或 manifest/sql/dm（信创达梦）。
+# 达梦示例：link: "dm:CONFIG_CENTER:ConfigCenter_123@tcp(127.0.0.1:5236)"
+database:
+  default:
+    link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/config_center"
+    debug: true
+
+svc:
+  etcd:
+    host: "127.0.0.1:2379"
+    seedDir: "manifest/etcd-seed"
+
+auth:
+  jwtSecret: "configure-center-dev-secret-change-me"
+  expire: "24h"
+  # 登录账户优先走审计库 AUTH_USERS 表（bcrypt 哈希 + 失败 5 次锁定 10 分钟，
+  # 见 manifest/sql/*/004_auth_users.sql）。表为空时首次启动会用下面的 users 初始化；
+  # 表不存在时回退使用以下静态账户。
+  users:
+    - username: admin
+      password: admin123
+      role: admin
+    - username: operator
+      password: operator123
+      role: operator
+  agentToken: "dev-agent-token"
+
+deploy:
+  artifactDir: "data/artifacts"
+  jobTimeout: "10m"

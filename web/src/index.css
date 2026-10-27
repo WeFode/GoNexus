@@ -1,0 +1,68 @@
+/* 不引入 Tailwind preflight，避免覆盖 antd 默认样式 */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ant-color-bg-layout, #f5f5f5);
+}
+
+.yaml-editor {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* 登录页品牌区 */
+.login-brand {
+  background: linear-gradient(135deg, #0a2a5e 0%, #0b4da2 55%, #1677ff 100%);
+}
+.login-logo {
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(4px);
+}
+.login-feat-icon {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+/* 节点/资源条 */
+.meter-bar {
+  height: 6px;
+  border-radius: 4px;
+  background: #f0f0f0;
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+/* 状态点 */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.status-dot.ok {
+  background: #52c41a;
+  box-shadow: 0 0 0 3px rgba(82, 196, 26, 0.15);
+}
+.status-dot.bad {
+  background: #ff4d4f;
+  box-shadow: 0 0 0 3px rgba(255, 77, 79, 0.15);
+}
+.status-dot.warn {
+  background: #faad14;
+  box-shadow: 0 0 0 3px rgba(250, 173, 20, 0.15);
+}

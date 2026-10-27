@@ -1,0 +1,5 @@
+# 本地配置勿提交
+manifest/config/config.yaml
+data/
+*.exe
+*.log

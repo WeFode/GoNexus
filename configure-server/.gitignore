@@ -1,0 +1,11 @@
+# 本地配置（含密钥/本机路径）勿提交
+manifest/config/config.yaml
+
+# 构建产物
+data/
+*.exe
+bin/
+temp/
+*.log
+.idea/
+.vscode/

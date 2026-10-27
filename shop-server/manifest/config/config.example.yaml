@@ -1,0 +1,8 @@
+# 复制为 config.yaml 后按本机修改。
+
+svc:
+  etcd:
+    host: "127.0.0.1:2379@shop-server"
+    watch: true
+    snapshotDir: "data/config-cache"
+    # username / password：etcd 开启 RBAC 后填写只读账号
