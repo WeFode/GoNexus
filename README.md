@@ -8,12 +8,14 @@
 
 ## 界面一览
 
+中台前端基于 **shadcn/ui（Radix + Tailwind CSS 4）**，支持亮 / 暗双主题；下面截图来自当前版本。
+
 | | |
 |:--:|:--:|
 | **概览**<br><img src="docs/assets/screenshots/overview.png" width="480" alt="概览：配置源状态、接入规模与最近发布任务"> | **服务配置**<br><img src="docs/assets/screenshots/services.png" width="480" alt="服务配置：每个服务一张卡片，直接渲染当前 YAML"> |
 | **发布**<br><img src="docs/assets/screenshots/deploys.png" width="480" alt="发布：上传 tar、选节点、灰度/全量、回滚"> | **节点**<br><img src="docs/assets/screenshots/nodes.png" width="480" alt="节点：deploy-agent 上报的机器与容器"> |
 
-全部 11 张截图与逐页说明见 [中台前端 · 界面一览](./docs/02-reference/web-console.md#界面一览)。截图由本地 mock 后端渲染，**服务名、节点、镜像、时间均为虚构数据**。
+全部 13 张截图与逐页说明见 [中台前端 · 界面一览](./docs/02-reference/web-console.md#界面一览)。截图由本地 mock 后端渲染，**服务名、节点、镜像、时间均为虚构数据**；暗色示例见 [亮 / 暗主题](./docs/02-reference/web-console.md#亮暗主题)。
 
 ## 文档
 
@@ -117,6 +119,13 @@ svc:
 - 发布后 TCP + HTTP 健康探测，失败自动回滚旧镜像
 - 节点资源指标与部署推荐（按剩余内存和 CPU 打分，推荐不自动下发）
 - 容器启停重启、镜像回滚、配置回滚各自独立
+
+**可观测**
+
+- 请求量 / RPS / 错误率 / P95、30 分钟流量图、状态码分布与 Top 路由
+- Go 运行时指标（goroutine、堆内存、GC、uptime）
+- SSE 实时日志控制台：级别 / 来源 / 服务过滤、关键字高亮、暂停、清空、回到最新
+- 服务日志页：按服务聚合、全屏、下载、自动跟随
 
 **明确不提供**
 

@@ -6,9 +6,9 @@
 
 ## 界面一览
 
-> 以下截图由本地 mock 后端渲染，**服务名、节点、镜像、时间、账号都是虚构数据**，只用于展示界面与交互，不来自任何真实环境。
+> 以下页面截图由本地 mock 后端 + 当前 shadcn/ui 前端渲染，**服务名、节点、镜像、时间、账号都是虚构数据**，只用于展示界面与交互，不来自任何真实环境。
 >
-> **截图对应迁移前的 antd 版本**：界面结构、文案与交互一致，配色已换为中性灰阶 + 近黑主色，并支持亮/暗双主题。新 UI 的截图待有后端环境时重拍。
+> 中台支持亮 / 暗双主题，暗色示例见 [亮 / 暗主题](#亮暗主题)。
 
 ### 登录
 
@@ -21,6 +21,18 @@
 ![概览](../assets/screenshots/overview.png)
 
 四个指标卡分别是 etcd 连通状态、公共配置数量、服务配置数量、在线节点数（`last_seen < 45s` 记为在线）。右侧「最近发布任务」直接读发布任务表，把探针回写的英文 message 翻成中文说明；左下「常用操作」是三个高频入口的快捷跳转。「写入 seed」只补 etcd 里缺失的 key，「强制覆盖」会用 `manifest/etcd-seed` 整体重写，后者仅 `admin` 可执行。页面每 15 秒自动刷新一次。
+
+### 可观测
+
+![可观测](../assets/screenshots/observability.png)
+
+四个指标卡是请求总数（含 RPS 与处理中）、错误率、P95 延迟与日志缓冲；中间是最近 30 分钟请求量柱状图（红点为 5xx），下方是 Top 路由；右栏是状态码分布与 Go 运行时。底部深色面板是 SSE 实时日志，支持级别 / 来源 / 服务过滤、关键字高亮、暂停、清空和回到最新；指标每 10 秒刷新一次。
+
+### 服务日志
+
+![服务日志](../assets/screenshots/service-logs.png)
+
+左侧按服务聚合（在线 / 离线、累计条数、最近输出），右侧是 `tail -f` 风格的终端：级别过滤、关键字高亮、暂停 / 继续、清空、下载当前视图、全屏；离开底部后会出现「回到最新」。
 
 ### 公共配置
 
@@ -76,15 +88,21 @@
 
 选定产物后按各节点剩余资源打分（`0.4 × CPU 空闲 + 0.6 × 内存空闲`），并逐台给出不适合的原因——例如端口已被占用、探针离线。「部署到推荐节点」只是把选择结果填进表单，**不会自动下发**，仍需回到「确认发布」人工点一次。
 
+### 亮暗主题
+
+![暗色主题](../assets/screenshots/theme-dark.png)
+
+顶栏右上角的太阳 / 月亮按钮切换主题，选择写入 `localStorage['cc-theme']`，首次访问跟随系统。两套值都在 `web/src/index.css` 的 `:root` / `.dark` 里，组件只消费语义 token；日志控制台在两种主题下都保持深色。
+
 ### 这些截图是怎么来的
 
-用一个只监听 `127.0.0.1` 的临时 mock API 顶替 `configure-server`，前端代码与真实运行时完全一致；截图工具链本身不入库，重新生成时需要三样东西：
+用一个只监听 `127.0.0.1` 的临时 mock API 顶替 `configure-server`，前端代码与真实运行时完全一致；截图工具链不入库，重新生成需要三样东西：
 
-1. **mock 后端**：按 [HTTP API 参考](api.md) 的响应包 `{ code, message, data }` 返回虚构数据即可，端口随意，只要代理指过去。
-2. **注入脚本**：往 `index.html` 的 `<head>` 前面塞一段脚本，写 `localStorage['configure-center.token']` 伪造登录态，再按 URL 参数 `?shot=` 点开对应的弹窗 / 抽屉。
-3. **headless Chrome**：`--headless=new --window-size=1440,1000 --virtual-time-budget=45000 --screenshot=out.png <url>`。
+1. **mock 后端**：按 [HTTP API 参考](api.md) 的响应包 `{ code, message, data }` 返回虚构数据，端口与 Vite 代理一致（9000）。
+2. **注入脚本**：临时放一个 `public/__shot.html`，写入 `localStorage['configure-center.token']` 与 `cc-theme` 后 `location.replace()` 到目标路由；截完删除。
+3. **headless Chrome + CDP**：`--headless=new --remote-debugging-port=0`，用 `Emulation.setDeviceMetricsOverride` 固定 1440×900 / 390×844，真实等待 4–5s 后 `Page.captureScreenshot`。比 `--virtual-time-budget` 稳，SSE 长连接不会把截图卡住。
 
-两个坑值得记一下：
+如果改用 `--virtual-time-budget`，两个坑值得记一下：
 
 - `--virtual-time-budget` 会把 Radix + `tw-animate-css` 的入场动画冻在 `data-state="open"` 的首帧（`opacity: 0`），弹窗、抽屉、下拉全是透明遮罩。截图前需要强制 `[data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="dropdown-menu-content"] { animation: none !important; opacity: 1 !important }`；退场同理要强制 `opacity: 0`，否则关掉的菜单会留在画面上。
 - 断点与暗色由 `class="dark"` 和媒体查询驱动：`index.html` 的内联脚本会读 `localStorage['cc-theme']`，没写过时跟随 `prefers-color-scheme`。截图机器如果是暗色系统，先写入 `cc-theme=light` 再刷新，否则拿到的是暗色图。
