@@ -1,30 +1,34 @@
 -- GoFrame scaffold · products demo
+-- 注意：表名与列名使用大写 + 双引号，与 manifest/sql/dm/002_shop_schema.sql
+-- 以及 shop-server/internal/dao 里由 GoFrame CLI 生成的 DAO 保持一致；
+-- PostgreSQL 不引用大写标识时会折叠成小写，导致 DAO 查询 "PRODUCTS" 失败。
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-CREATE TABLE IF NOT EXISTS products (
-    id          BIGSERIAL PRIMARY KEY,
-    name        VARCHAR(128)  NOT NULL,
-    description TEXT          NOT NULL DEFAULT '',
-    price       NUMERIC(12,2) NOT NULL DEFAULT 0,
-    stock       INT           NOT NULL DEFAULT 0,
-    status      SMALLINT      NOT NULL DEFAULT 1, -- 1=上架 0=下架
-    created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS "PRODUCTS" (
+    "ID"          BIGSERIAL     PRIMARY KEY,
+    "NAME"        VARCHAR(128)  NOT NULL,
+    "DESCRIPTION" TEXT          NOT NULL DEFAULT '',
+    "PRICE"       NUMERIC(12,2) NOT NULL DEFAULT 0,
+    "STOCK"       INT           NOT NULL DEFAULT 0,
+    "STATUS"      SMALLINT      NOT NULL DEFAULT 1, -- 1=上架 0=下架
+    "CREATED_AT"  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    "UPDATED_AT"  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_products_name ON products (name);
-CREATE INDEX IF NOT EXISTS idx_products_status ON products (status);
+CREATE INDEX IF NOT EXISTS "IDX_PRODUCTS_NAME" ON "PRODUCTS" ("NAME");
+CREATE INDEX IF NOT EXISTS "IDX_PRODUCTS_STATUS" ON "PRODUCTS" ("STATUS");
 
-COMMENT ON TABLE products IS '商品表（脚手架示例）';
-COMMENT ON COLUMN products.name IS '商品名称';
-COMMENT ON COLUMN products.description IS '商品描述';
-COMMENT ON COLUMN products.price IS '价格';
-COMMENT ON COLUMN products.stock IS '库存';
-COMMENT ON COLUMN products.status IS '状态：1上架 0下架';
+COMMENT ON TABLE "PRODUCTS" IS '商品表（脚手架示例）';
+COMMENT ON COLUMN "PRODUCTS"."NAME" IS '商品名称';
+COMMENT ON COLUMN "PRODUCTS"."DESCRIPTION" IS '商品描述';
+COMMENT ON COLUMN "PRODUCTS"."PRICE" IS '价格';
+COMMENT ON COLUMN "PRODUCTS"."STOCK" IS '库存';
+COMMENT ON COLUMN "PRODUCTS"."STATUS" IS '状态：1上架 0下架';
 
-
-        -- 示例商品数据（可按需删除）
-INSERT INTO products (name, description, price, stock, status)
-VALUES
+-- 示例商品数据：只在表为空时写入，重复执行不会产生重复行。
+INSERT INTO "PRODUCTS" ("NAME", "DESCRIPTION", "PRICE", "STOCK", "STATUS")
+SELECT v.* FROM (VALUES
     ('示例商品 A', '脚手架演示商品', 99.00, 100, 1),
-    ('示例商品 B', '脚手架演示商品', 199.50, 50, 1);
+    ('示例商品 B', '脚手架演示商品', 199.50, 50, 1)
+) AS v("NAME", "DESCRIPTION", "PRICE", "STOCK", "STATUS")
+WHERE NOT EXISTS (SELECT 1 FROM "PRODUCTS");

@@ -20,7 +20,7 @@ type DeployRequest struct {
 
 type IDeploy interface {
 	Heartbeat(ctx context.Context, in *v1.HeartbeatReq) ([]v1.JobItem, error)
-	ReportJob(ctx context.Context, id int64, status, message string) error
+	ReportJob(ctx context.Context, id int64, nodeId, status, message string) error
 	ListNodes(ctx context.Context) ([]v1.NodeItem, error)
 	Recommend(ctx context.Context, artifactID int64, hostPort int) (*v1.RecommendRes, error)
 	ListArtifacts(ctx context.Context, serviceName string) ([]v1.ArtifactItem, error)
@@ -30,7 +30,7 @@ type IDeploy interface {
 	Promote(ctx context.Context, artifactId int64, operator, remark string) ([]int64, error)
 	CreateLifecycle(ctx context.Context, nodeId, serviceName, action, operator string) (int64, error)
 	ListJobs(ctx context.Context, nodeId string) ([]v1.DeployJobItem, error)
-	ArtifactFile(ctx context.Context, id int64) (path string, err error)
+	ArtifactFile(ctx context.Context, id int64) (path, sha256 string, err error)
 }
 
 var localDeploy IDeploy

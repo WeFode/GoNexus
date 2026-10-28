@@ -1,3 +1,9 @@
 deploy/dist/*.tar
 deploy/dist/*.json
 !deploy/catalog.json
+
+# dev.ps1 本地编译产物与日志
+.dev/
+
+# IDE 本地 Canvas 产物（不参与交付）
+.qoder/

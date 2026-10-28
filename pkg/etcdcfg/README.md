@@ -1,20 +1,18 @@
 # etcdcfg
 
-GoFrame 微服务接入配置中心的**唯一依赖**。本地文件只留 `svc.etcd.host`，其余 `server` / `database` / `redis` 由 etcd `shared/*` + `services/<服务名>` 合并下发。
+GoFrame 微服务接入配置中心的**唯一依赖**。本地文件只留 `svc.etcd.host`，其余 `server` / `database` / `redis` 由 etcd 的 `shared/*` + `services/<服务名>` 合并下发。
 
-## 最小接入（三行）
+权威文档在 `docs/`，本文件只做入口，避免同一内容多处漂移。
 
-本地 `manifest/config/config.yaml`：
+| 你要做什么 | 看哪里 |
+|------------|--------|
+| 接入一个新服务 | [接入新微服务](../../docs/01-getting-started/integrate-a-service.md)，完整模板在 [examples/gf-service/](../../examples/gf-service/) |
+| 了解行为与契约 | [etcdcfg SDK](../../docs/02-reference/etcdcfg-sdk.md) —— 合并算法、热重载边界、快照容灾、`loopbackAs`、探活契约 |
+| 查配置项 | [配置项字典](../../docs/02-reference/configuration.md#pkgetcdcfg所有业务微服务) |
+| 理解为什么这样设计 | [设计决策记录](../../docs/03-development/design-decisions.md) —— D-01 不做数据库双写、D-02 快照落磁盘、D-03 Watch 拆两个前缀、D-04 Boot 不进 `init()` |
+| 改这个包 | [测试](../../docs/03-development/testing.md)、[贡献指南](../../CONTRIBUTING.md) |
 
-```yaml
-svc:
-  etcd:
-    host: "127.0.0.1:2379@your-service"   # 与 etcd 服务 key、打包 catalog.name 相同
-    watch: true
-    snapshotDir: "data/config-cache"
-    # loopbackAs: "host.docker.internal"  # 仅容器内部署时由 Agent 写入
-    stickyKeys: []
-```
+## 最小接入
 
 `internal/cmd/cmd.go`，必须在 `g.Server()` / `g.DB()` **之前**：
 
@@ -31,34 +29,12 @@ s.Group("/api/v1", func(group *ghttp.RouterGroup) {
 })
 ```
 
-业务代码继续 `g.Cfg().Get`，不必改。不要放 `init()`，否则 `go test` 会强行连 etcd。
+业务代码继续 `g.Cfg().Get`，不必改。**不要放 `init()`**，否则 `go test` 会强行连 etcd。
 
-`go.mod`：
+## 测试
 
+```bash
+go test ./pkg/etcdcfg/...
 ```
-require configure-center/pkg/etcdcfg v0.0.0
-replace configure-center/pkg/etcdcfg => ../pkg/etcdcfg
-```
 
-独立仓库把 replace 指到本仓库的 `pkg/etcdcfg` 即可。
-
-然后：中台「服务配置」新建同名 YAML，或放到 `configure-server/manifest/etcd-seed/services/<名>.yaml`。需要一键打包时再改 `deploy/catalog.json`。
-
-完整可复制文件见仓库 `examples/gf-service/`。
-
-## 行为
-
-- 启动拉 **shared + 本服务** 合并 YAML，原子写入 `data/config-cache/<service>.snapshot.yaml`
-- etcd 不可用且快照存在则用快照启动（health `degraded`），后台重连
-- Watch 只盯 `shared/` 前缀和本服务精确 key（可配 etcd 只读账号）
-- `GET /api/v1/health`：etcd + 配置来源；合并配置里有 `database` / `redis` 才探测
-
-## API
-
-| 函数 | 说明 |
-|------|------|
-| `Boot(ctx)` | 读本地 `svc.etcd.*`，切换 `g.Cfg()` |
-| `BootFromLocal(ctx)` | 同 Boot，返回 `*Adapter` |
-| `BindHealth(group)` | 注册 `GET /health` |
-| `Probe(ctx)` | 自定义探活时复用同一套结果 |
-| `Current()` / `Runtime()` | 取 Adapter / 热更新状态 |
+全部离线，不需要 etcd。

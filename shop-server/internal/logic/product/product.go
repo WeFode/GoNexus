@@ -56,6 +56,7 @@ func (s *sProduct) Create(ctx context.Context, req *v1.CreateReq) (*v1.CreateRes
 	if err != nil {
 		return nil, err
 	}
+	g.Log().Infof(ctx, "创建商品成功 id=%d name=%s", id, req.Name)
 	return &v1.CreateRes{Id: id}, nil
 }
 
@@ -139,6 +140,9 @@ func (s *sProduct) Update(ctx context.Context, req *v1.UpdateReq) error {
 	data[dao.Products.Columns().UpdatedAt] = gtime.Now()
 
 	_, err = dao.Products.Ctx(ctx).WherePri(req.Id).Data(data).Update()
+	if err == nil {
+		g.Log().Infof(ctx, "更新商品成功 id=%d fields=%d", req.Id, len(data))
+	}
 	return err
 }
 
@@ -151,5 +155,6 @@ func (s *sProduct) Delete(ctx context.Context, id int64) error {
 	if n == 0 {
 		return gerror.Newf("product %d not found", id)
 	}
+	g.Log().Infof(ctx, "删除商品成功 id=%d", id)
 	return nil
 }

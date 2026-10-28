@@ -22,7 +22,24 @@ function redirectLogin() {
 }
 
 async function parse<T>(res: Response, path: string): Promise<T> {
-  const json = (await res.json()) as GfResponse<T>
+  const raw = await res.text()
+  let json: GfResponse<T> | null = null
+  if (raw) {
+    try {
+      json = JSON.parse(raw) as GfResponse<T>
+    } catch {
+      json = null
+    }
+  }
+
+  // 网关/代理挂了时返回的是空体或 HTML，不能把 JSON 解析异常直接抛给用户
+  if (!json) {
+    if (res.status >= 500) {
+      throw new ApiError(res.status, `服务暂不可用（HTTP ${res.status}），请确认 configure-server 已启动`)
+    }
+    throw new ApiError(res.status, `请求失败（HTTP ${res.status}）`)
+  }
+
   if (res.status === 401 || json.code === 401) {
     if (!path.includes('/auth/login')) {
       redirectLogin()

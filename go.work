@@ -4,5 +4,6 @@ use (
 	./configure-server
 	./deploy-agent
 	./pkg/etcdcfg
+	./pkg/obslog
 	./shop-server
 )

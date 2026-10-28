@@ -25,6 +25,9 @@ svc:
 auth:
   jwtSecret: "configure-center-dev-secret-change-me"
   expire: "24h"
+  # 登录账户优先走审计库 AUTH_USERS 表（bcrypt 哈希 + 失败 5 次锁定 10 分钟，
+  # 见 manifest/sql/*/004_auth_users.sql）。表为空时首次启动会用下面的 users 初始化；
+  # 表不存在时回退使用以下静态账户。
   users:
     - username: admin
       password: admin123
@@ -32,6 +35,8 @@ auth:
     - username: operator
       password: operator123
       role: operator
+  # 日志上报令牌（微服务 OBS_TOKEN）。与 agentToken 分开，避免业务进程拿到部署权限。
+  observabilityToken: "dev-observability-token"
   agentToken: "dev-agent-token"
 
 deploy:

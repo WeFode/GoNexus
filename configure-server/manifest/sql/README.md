@@ -1,68 +1,44 @@
 # 配置中心库表
 
-配置中心的审计/发布表**只维护在本目录**，不再写进 Go 代码。etcd 仍是运行时配置真相源；这里只服务：
+审计与发布表**只维护在本目录**，不写进 Go 代码。etcd 仍是运行时配置真相源，这里的表只服务：配置历史与回滚、节点心跳、镜像产物、发布任务、登录账户。
 
-| 表 | 用途 |
-|----|------|
-| `config_history` | 配置发布历史与回滚 |
-| `deploy_nodes` | Agent 心跳 |
-| `deploy_artifacts` | 镜像 tar 元数据 |
-| `deploy_jobs` | 发布任务 |
+**配置中心进程不执行 DDL**，启动时只探测 `config_history` 是否可读，失败仅告警。
 
-`pgsql/` 与 `dm/` 表名、列名相同（达梦用双引号小写），GoFrame ORM 不用改。切换数据库只改 `manifest/config/config.yaml` 的 `database.default.link`。
+完整文档：[数据库表结构](../../../docs/02-reference/database-schema.md) —— 每张表的字段、索引、状态流转、初始化方式与达梦对齐规则。
 
-## PostgreSQL（本地 compose 默认）
+## 两套脚本
 
-```powershell
-cd configure-server
-make docker-up
-# 首次创建数据卷时 scripts/pg-init 会建 config_center 并执行 pgsql/*.sql
-# 其中 002_shop_schema.sql 写入 app_db，其余写入 config_center
-```
+`pgsql/` 与 `dm/` 的库表语义一致：配置中心表 PG 用小写、达梦用双引号大写，代码里写不带引号的小写表名（PG 落到小写、达梦折叠到大写）。`products` 是例外：shop-server 的 DAO 由 CLI 按大写生成，两套脚本都建 `"PRODUCTS"`。GoFrame ORM 不用改代码，切换只改 `manifest/config/config.yaml` 的 `database.default.link`。
 
-已有数据卷、需要补表时：
+| 脚本 | 目标库 | 内容 |
+|------|--------|------|
+| `000_create_database.sql` / `dm/000_create_user.sql` | `postgres` / SYSDBA | 建 `config_center` 库；达梦建表空间与 `CONFIG_CENTER` 用户 |
+| `001_schema.sql` | `config_center` | `config_history`、`deploy_nodes`、`deploy_artifacts`、`deploy_jobs` |
+| `002_shop_schema.sql` | `app_db` | `products`（shop-server 示例，与配置中心无关） |
+| `003_node_metrics.sql` | `config_center` | 补节点指标列，供发布页推荐节点 |
+| `004_auth_users.sql` | `config_center` | `auth_users` 登录账户（bcrypt） |
+| `005_deploy_jobs_index.sql` | `config_center` | 补 `deploy_jobs(status, updated_at)` 索引，供老库升级 |
 
-```powershell
-psql -U postgres -h 127.0.0.1 -p 5433 -d postgres -f manifest/sql/pgsql/000_create_database.sql
+PG 脚本全部带 `IF NOT EXISTS`，可重复执行；DM 的 `ALTER` / `CREATE INDEX` 重复执行会报“已存在”，忽略后继续即可。
+
+## 本地 compose
+
+`make docker-up` 首次创建数据卷时，`scripts/pg-init/00-init.sh` 会建 `config_center`（`001`/`003`/`004`）和 `app_db`（`002`）。
+
+**卷已存在过就不再执行**（哪怕上次初始化失败）。已有库手工补：
+
+```bash
 psql -U postgres -h 127.0.0.1 -p 5433 -d config_center -f manifest/sql/pgsql/001_schema.sql
-```
-
-`000_create_database.sql` 在库已存在时会报错，可忽略后继续跑 `001_schema.sql`（`IF NOT EXISTS`）。
-
-已有库补节点 CPU/内存列（发布页推荐节点要用）：
-
-```powershell
 psql -U postgres -h 127.0.0.1 -p 5433 -d config_center -f manifest/sql/pgsql/003_node_metrics.sql
+psql -U postgres -h 127.0.0.1 -p 5433 -d config_center -f manifest/sql/pgsql/004_auth_users.sql
+psql -U postgres -h 127.0.0.1 -p 5433 -d config_center -f manifest/sql/pgsql/005_deploy_jobs_index.sql
 ```
 
-达梦已有库执行 `dm/003_node_metrics.sql`；列已存在时报错可忽略。
-
-连接串：
-
-```yaml
-database:
-  default:
-    link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/config_center"
-```
-
-## 达梦 DM8（信创）
-
-1. SYSDBA 执行 `dm/000_create_user.sql`（按现场改 DATAFILE 路径和口令）。
-2. 用 `CONFIG_CENTER` 执行 `dm/001_schema.sql`。
-3. 改本地配置（注释掉 pgsql 的 link）：
-
-```yaml
-database:
-  default:
-    link: "dm:CONFIG_CENTER:ConfigCenter_123@tcp(127.0.0.1:5236)"
-```
-
-`main.go` 已同时注册 pgsql 与 dm 驱动，不必改代码。进程启动只探测 `config_history` 是否可读，**不会**自动建表。
+达梦用 `disql`：
 
 ```text
 disql SYSDBA/SYSDBA@127.0.0.1:5236
-SQL> start manifest/sql/dm/000_create_user.sql
-SQL> exit
+SQL> start manifest/sql/dm/000_create_user.sql     -- 先按现场改 DATAFILE 路径和口令
 
 disql CONFIG_CENTER/ConfigCenter_123@127.0.0.1:5236
 SQL> start manifest/sql/dm/001_schema.sql

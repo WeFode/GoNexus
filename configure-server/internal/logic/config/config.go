@@ -2,9 +2,11 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"configure-center/pkg/etcdcfg"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -12,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "configure-server/api/config/v1"
+	obsv "configure-server/internal/observability"
 	"configure-server/internal/service"
 	"configure-server/utility/etcdx"
 )
@@ -88,7 +91,12 @@ func (s *sConfig) DeleteShared(ctx context.Context, key string, audit service.Au
 	if err := etcdx.Client().DeleteShared(ctx, key); err != nil {
 		return err
 	}
-	s.recordHistory(ctx, fullKey("shared", key), prev, actionDelete, audit)
+	fk := fullKey("shared", key)
+	ver, _ := s.recordHistory(ctx, fk, prev, actionDelete, audit)
+	obsv.Emit(obsv.Entry{
+		Source: obsv.SourceConfig, Action: "delete", User: audit.Operator,
+		Message: configChangedText("删除配置", fk, ver),
+	})
 	return nil
 }
 
@@ -138,12 +146,27 @@ func (s *sConfig) putConfig(ctx context.Context, kind, name, content string, aud
 	}
 	fk := fullKey(kind, name)
 	if !exists {
-		s.recordHistory(ctx, fk, content, actionCreate, audit)
+		ver, _ := s.recordHistory(ctx, fk, content, actionCreate, audit)
+		obsv.Emit(obsv.Entry{
+			Source: obsv.SourceConfig, Action: "create", User: audit.Operator,
+			Message: configChangedText("新增配置", fk, ver),
+		})
 		return nil
 	}
 	s.ensureBaseline(ctx, fk, prev, audit)
-	s.recordHistory(ctx, fk, content, actionUpdate, audit)
+	ver, _ := s.recordHistory(ctx, fk, content, actionUpdate, audit)
+	obsv.Emit(obsv.Entry{
+		Source: obsv.SourceConfig, Action: "update", User: audit.Operator,
+		Message: configChangedText("更新配置", fk, ver),
+	})
 	return nil
+}
+
+func configChangedText(prefix, key string, version int) string {
+	if version > 0 {
+		return fmt.Sprintf("%s %s（v%d）", prefix, key, version)
+	}
+	return fmt.Sprintf("%s %s", prefix, key)
 }
 
 func (s *sConfig) DeleteService(ctx context.Context, name string, audit service.Audit) error {
@@ -154,7 +177,12 @@ func (s *sConfig) DeleteService(ctx context.Context, name string, audit service.
 	if err := etcdx.Client().DeleteService(ctx, name); err != nil {
 		return err
 	}
-	s.recordHistory(ctx, fullKey("services", name), prev, actionDelete, audit)
+	fk := fullKey("services", name)
+	ver, _ := s.recordHistory(ctx, fk, prev, actionDelete, audit)
+	obsv.Emit(obsv.Entry{
+		Source: obsv.SourceConfig, Action: "delete", User: audit.Operator,
+		Message: configChangedText("删除配置", fk, ver),
+	})
 	return nil
 }
 
@@ -162,9 +190,42 @@ func (s *sConfig) Preview(ctx context.Context, name string) (string, error) {
 	return etcdx.Client().LoadMergedYAML(ctx, name)
 }
 
-func (s *sConfig) Seed(ctx context.Context, dir string, force bool, audit service.Audit) (int, error) {
+// seedRootDir 是 Seed 允许读取的根目录。API 的 dir 参数不能越过它，
+// 否则已登录用户可以借服务端读任意目录下的 yaml。
+func seedRootDir() string {
+	dir := strings.TrimSpace(g.Cfg().MustGet(context.Background(), "svc.etcd.seedDir").String())
 	if dir == "" {
 		dir = "manifest/etcd-seed"
+	}
+	return dir
+}
+
+func withinDir(root, dir string) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absDir)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func (s *sConfig) Seed(ctx context.Context, dir string, force bool, audit service.Audit) (int, error) {
+	root := seedRootDir()
+	if dir == "" {
+		dir = root
+	}
+	if !withinDir(root, dir) {
+		return 0, gerror.Newf("seed 目录必须位于 %s 之内", root)
 	}
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -351,34 +412,51 @@ func (s *sConfig) Rollback(ctx context.Context, kind, key string, version int, a
 	if audit.Remark == "" {
 		audit.Remark = "回滚至版本 " + g.NewVar(version).String()
 	}
-	return s.recordHistory(ctx, fk, row.Content, actionRollback, audit)
+	ver, err := s.recordHistory(ctx, fk, row.Content, actionRollback, audit)
+	if err != nil {
+		return ver, err
+	}
+	obsv.Emit(obsv.Entry{
+		Source: obsv.SourceConfig, Action: "rollback", User: audit.Operator,
+		Message: fmt.Sprintf("回滚配置 %s 至版本 %d（新版本 v%d）", fk, version, ver),
+	})
+	return ver, nil
 }
 
 func (s *sConfig) recordHistory(ctx context.Context, configKey, content, action string, audit service.Audit) (int, error) {
-	var maxVer int
-	val, err := g.DB().Model("config_history").Where("config_key", configKey).Value("MAX(version)")
-	if err != nil {
-		g.Log().Warningf(ctx, "读取历史版本号失败（etcd 已写入）: %v", err)
-		return 0, err
-	}
-	if val != nil && !val.IsEmpty() {
-		maxVer = val.Int()
-	}
-	next := maxVer + 1
 	if audit.Operator == "" {
 		audit.Operator = "anonymous"
 	}
-	_, err = g.DB().Model("config_history").Data(g.Map{
-		"config_key":  configKey,
-		"version":     next,
-		"content":     content,
-		"action_type": action,
-		"operator":    audit.Operator,
-		"remark":      audit.Remark,
-	}).Insert()
-	if err != nil {
-		g.Log().Warningf(ctx, "写入审计日志失败（etcd 已写入）: %v", err)
-		return 0, err
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		var maxVer int
+		val, err := g.DB().Model("config_history").Where("config_key", configKey).Value("MAX(version)")
+		if err != nil {
+			g.Log().Warningf(ctx, "读取历史版本号失败（etcd 已写入）: %v", err)
+			return 0, err
+		}
+		if val != nil && !val.IsEmpty() {
+			maxVer = val.Int()
+		}
+		next := maxVer + 1
+		_, err = g.DB().Model("config_history").Data(g.Map{
+			"config_key":  configKey,
+			"version":     next,
+			"content":     content,
+			"action_type": action,
+			"operator":    audit.Operator,
+			"remark":      audit.Remark,
+		}).Insert()
+		if err == nil {
+			return next, nil
+		}
+		lastErr = err
+		// 并发写同一 key 时 (config_key, version) 唯一索引会冲突，重新取 MAX 再试。
+		if attempt < maxAttempts-1 {
+			time.Sleep(time.Duration(10+attempt*20) * time.Millisecond)
+		}
 	}
-	return next, nil
+	g.Log().Warningf(ctx, "写入审计日志失败（etcd 已写入，已重试 %d 次）: %v", maxAttempts, lastErr)
+	return 0, lastErr
 }

@@ -5,6 +5,19 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>配置中心</title>
+    <script>
+      // 在首帧前决定明暗，避免暗色用户看到一闪而过的白屏
+      ;(function () {
+        try {
+          var pref = localStorage.getItem('cc-theme')
+          var dark = pref === 'dark' || (!pref && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {
+          /* localStorage 不可用时按亮色渲染 */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

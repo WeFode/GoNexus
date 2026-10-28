@@ -75,4 +75,5 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_deploy_jobs_node ON deploy_jobs (node_id, status, id);
+CREATE INDEX IF NOT EXISTS idx_deploy_jobs_status_updated ON deploy_jobs (status, updated_at);
 COMMENT ON TABLE deploy_jobs IS '发布任务：waiting（灰度等待）/ pending → running → success/failed；action=deploy|rollback|canary|start|stop|restart|stop-canary';

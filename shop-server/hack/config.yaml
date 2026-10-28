@@ -3,10 +3,10 @@
 gfcli:
   gen:
     dao:
-#      - link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/app_db"
-      - link: "dm:CONFIG_CENTER:ConfigCenter_123@tcp(127.0.0.1:5236)/CONFIG_CENTER"
+      # 达梦：- link: "dm:CONFIG_CENTER:ConfigCenter_123@tcp(127.0.0.1:5236)/CONFIG_CENTER"
+      - link: "pgsql:postgres:123456@tcp(127.0.0.1:5433)/app_db"
         descriptionTag: true
-        tables: "PRODUCTS"
+        tables: "products"
         jsonCase: "Snake"
 
     ctrl:

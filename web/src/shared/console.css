@@ -1,0 +1,51 @@
+/*
+ * 日志控制台共用样式：可观测页与服务日志页两块控制台共用。
+ * 控制台在亮色主题下也保持深色，所以这里用固定的 zinc 色阶，不消费主题 token。
+ * 需要被组件 prop 合并的样式（Select 触发器、输入框）放在 lib/console.ts，
+ * 由调用方通过 className 传入，避免 components 层被 utilities 层覆盖。
+ */
+@layer components {
+  .console-shell {
+    @apply relative overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 shadow-md;
+  }
+
+  .console-head {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-zinc-900/60 px-3.5 py-2.5;
+  }
+
+  .console-dot {
+    @apply size-2 shrink-0 rounded-full;
+  }
+
+  .console-tools {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .console-bar {
+    @apply flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-white/5 bg-black/30 px-3.5 py-1.5 text-xs text-zinc-500;
+  }
+
+  .console-bar b {
+    @apply font-semibold text-zinc-300;
+  }
+
+  .console-body {
+    @apply flex min-h-0 flex-col overflow-x-hidden overflow-y-auto py-1.5 font-mono;
+  }
+
+  .console-empty {
+    @apply flex flex-1 flex-col items-center justify-center gap-1.5 font-sans;
+  }
+
+  .console-empty-title {
+    @apply text-sm font-medium text-zinc-400;
+  }
+
+  .console-empty-hint {
+    @apply text-xs text-zinc-500;
+  }
+
+  .console-jump {
+    @apply absolute right-6 inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1 text-xs font-medium text-zinc-900 shadow-md transition-colors hover:bg-white;
+  }
+}

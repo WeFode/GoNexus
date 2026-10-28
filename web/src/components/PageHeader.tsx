@@ -1,24 +1,19 @@
-import { Flex, Typography } from 'antd'
 import type { ReactNode } from 'react'
 
 interface Props {
   title: string
-  extra?: ReactNode
   description?: string
+  extra?: ReactNode
 }
 
-export function PageHeader({ title, extra, description }: Props) {
+export function PageHeader({ title, description, extra }: Props) {
   return (
-    <Flex justify="space-between" align="flex-start" className="mb-4" gap={16}>
-      <div>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          {title}
-        </Typography.Title>
-        {description ? (
-          <Typography.Text type="secondary">{description}</Typography.Text>
-        ) : null}
+    <div className="mb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-3 sm:mb-5">
+      <div className="min-w-0">
+        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        {description ? <p className="text-muted-foreground mt-1 text-[13px] leading-5">{description}</p> : null}
       </div>
-      {extra}
-    </Flex>
+      {extra ? <div className="flex flex-wrap items-center gap-2">{extra}</div> : null}
+    </div>
   )
 }

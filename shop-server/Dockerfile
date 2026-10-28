@@ -4,6 +4,9 @@
 FROM golang:1.25-alpine AS builder
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+# 国内环境请使用 --build-arg GOPROXY=https://goproxy.cn,direct
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates
 COPY pkg/etcdcfg ./pkg/etcdcfg

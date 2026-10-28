@@ -1,27 +1,15 @@
-import { Alert, Button, Card, Flex, Table, Tag, Typography } from 'antd'
-import type { TableProps } from 'antd'
 import { useEffect, useState } from 'react'
+import { RocketIcon } from 'lucide-react'
 import { recommendNode, type RecommendNode, type RecommendRes } from '../api/deploy'
-
-function gb(n: number) {
-  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`
-}
-
-function Meter({ percent, text }: { percent: number | null; text: string }) {
-  const color = percent == null ? undefined : percent >= 85 ? '#ff4d4f' : percent >= 70 ? '#faad14' : '#52c41a'
-  return (
-    <Flex vertical gap={2} style={{ minWidth: 128 }}>
-      <Typography.Text>{text}</Typography.Text>
-      {percent == null ? (
-        <Typography.Text type="secondary">未上报</Typography.Text>
-      ) : (
-        <div style={{ height: 6, borderRadius: 4, background: '#f0f0f0' }}>
-          <div style={{ height: 6, borderRadius: 4, width: `${Math.min(100, Math.max(0, percent))}%`, background: color }} />
-        </div>
-      )}
-    </Flex>
-  )
-}
+import { formatGB, pctOfReported, pctOfUsed } from '../utils/metrics'
+import { EmptyState } from './EmptyState'
+import { InlineAlert } from './InlineAlert'
+import { Meter } from './Meter'
+import { Panel } from './Panel'
+import { ToneBadge } from './ToneBadge'
+import { Button } from './ui/button'
+import { Skeleton } from './ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 
 export function RecommendPanel({
   artifactId,
@@ -53,112 +41,145 @@ export function RecommendPanel({
           setData(res)
           setError('')
         }
-      } catch (e) {
-        if (!stop) setError(e instanceof Error ? e.message : '推荐失败')
+      } catch (err) {
+        if (!stop) setError(err instanceof Error ? err.message : '推荐失败')
       } finally {
         if (!stop) setLoading(false)
       }
     }
     void load()
-    const t = setInterval(() => void load(), 8000)
+    const timer = setInterval(() => void load(), 8000)
     return () => {
       stop = true
-      clearInterval(t)
+      clearInterval(timer)
     }
   }, [artifactId, hostPort])
 
   if (!artifactId) {
     return (
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginTop: 12 }}
+      <InlineAlert
+        tone="info"
         title="选择产物后显示推荐节点"
-        description="按各节点剩余内存和 CPU 打分，并说明不适合的原因。确认后再下发，不会自动部署。"
+        description="按各节点剩余内存和 CPU 打分，并逐台说明不适合的原因。确认后再下发，不会自动部署。"
       />
     )
   }
 
-  const columns: TableProps<RecommendNode>['columns'] = [
-    {
-      title: '节点',
-      dataIndex: 'nodeId',
-      width: 140,
-      render: (v: string, row) => (
-        <Flex vertical>
-          <Typography.Text strong>{v}</Typography.Text>
-          {row.recommended ? <Tag color="success">推荐</Tag> : row.eligible ? <Tag>可部署</Tag> : <Tag>不可部署</Tag>}
-        </Flex>
-      ),
-    },
-    {
-      title: 'CPU',
-      width: 150,
-      render: (_, row) => (
-        <Meter
-          percent={row.cpuUsedPercent < 0 ? null : Math.round(row.cpuUsedPercent)}
-          text={row.cpuUsedPercent < 0 ? `${row.ncpu || '-'} 核` : `${Math.round(row.cpuUsedPercent)}% · ${row.ncpu} 核`}
-        />
-      ),
-    },
-    {
-      title: '内存',
-      width: 170,
-      render: (_, row) => {
-        const known = row.memoryUsedBytes >= 0 && row.memoryBytes > 0
-        const pct = known ? Math.round((row.memoryUsedBytes / row.memoryBytes) * 100) : null
-        const text = !row.memoryBytes
-          ? '-'
-          : known
-            ? `${gb(row.memoryUsedBytes)} / ${gb(row.memoryBytes)}`
-            : `— / ${gb(row.memoryBytes)}`
-        return <Meter percent={pct} text={text} />
-      },
-    },
-    { title: '容器', dataIndex: 'containerCount', width: 70 },
-    {
-      title: '空闲分',
-      dataIndex: 'score',
-      width: 80,
-      render: (n: number, row) => (row.eligible ? n : '—'),
-    },
-    { title: '原因', dataIndex: 'reason' },
-    {
-      title: '',
-      width: 130,
-      render: (_, row) =>
-        row.eligible && !row.recommended ? (
-          <Button type="link" size="small" onClick={() => onDeploy([row.nodeId], `选择节点 ${row.nodeId}`)}>
-            部署到此节点
-          </Button>
-        ) : null,
-    },
-  ]
-
   return (
-    <Card className="mb-4" title="节点推荐" loading={loading && !data}>
-      {error ? <Alert className="mb-3" type="error" showIcon message={error} /> : null}
+    <Panel
+      title="节点推荐"
+      actions={<span className="text-muted-foreground text-xs">每 8 秒重新打分</span>}
+      bodyClassName="px-0 py-0"
+      loading={loading && !data}
+    >
+      {error ? (
+        <div className="px-4 py-3 sm:px-5">
+          <InlineAlert tone="danger" title={error} />
+        </div>
+      ) : null}
+
       {data ? (
-        <Flex vertical gap={12}>
-          <Flex justify="space-between" align="center" gap={12} wrap="wrap">
-            <Typography.Paragraph className="!mb-0">{data.summary}</Typography.Paragraph>
-            <Button
-              type="primary"
-              disabled={!data.recommendedNodeId}
-              onClick={() => onDeploy([data.recommendedNodeId], `推荐节点 ${data.recommendedNodeId}`)}
-            >
+        <div>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+            <p className="text-muted-foreground min-w-0 flex-1 text-[13px] leading-5">{data.summary}</p>
+            <Button size="sm" disabled={!data.recommendedNodeId} onClick={() => onDeploy([data.recommendedNodeId], `推荐节点 ${data.recommendedNodeId}`)}>
+              <RocketIcon />
               部署到推荐节点
             </Button>
-          </Flex>
-          <Table<RecommendNode>
-            rowKey="nodeId"
-            size="small"
-            pagination={false}
-            columns={columns}
-            dataSource={data.nodes}
-          />
-        </Flex>
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-40 pl-4">节点</TableHead>
+                <TableHead className="w-40">CPU</TableHead>
+                <TableHead className="w-48">内存</TableHead>
+                <TableHead className="w-16 text-right">容器</TableHead>
+                <TableHead className="w-16 text-right">空闲分</TableHead>
+                <TableHead>原因</TableHead>
+                <TableHead className="w-28 pr-4 text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.nodes.map((node: RecommendNode) => {
+                const cpuPercent = pctOfReported(node.cpuUsedPercent)
+                const memoryPercent = pctOfUsed(node.memoryUsedBytes, node.memoryBytes)
+                return (
+                  <TableRow key={node.nodeId}>
+                    <TableCell className="pl-4">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[13px] font-medium">{node.nodeId}</span>
+                        {node.recommended ? (
+                          <span>
+                            <ToneBadge tone="success">推荐</ToneBadge>
+                          </span>
+                        ) : node.eligible ? null : (
+                          <span>
+                            <ToneBadge tone="neutral">不可部署</ToneBadge>
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Meter
+                        caption={cpuPercent == null ? `${node.ncpu || '-'} 核` : `${cpuPercent}% · ${node.ncpu} 核`}
+                        percent={cpuPercent}
+                        minWidth={120}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {node.memoryBytes ? (
+                        <Meter
+                          caption={
+                            memoryPercent == null
+                              ? `— / ${formatGB(node.memoryBytes)}`
+                              : `${formatGB(node.memoryUsedBytes ?? 0)} / ${formatGB(node.memoryBytes)}`
+                          }
+                          percent={memoryPercent}
+                          minWidth={150}
+                        />
+                      ) : (
+                        <span className="text-muted-foreground text-xs">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right text-[13px] tabular-nums">{node.containerCount}</TableCell>
+                    <TableCell className="text-right text-[13px] tabular-nums">
+                      {node.eligible ? node.score : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground max-w-0 truncate text-xs" title={node.reason}>
+                      {node.reason}
+                    </TableCell>
+                    <TableCell className="pr-4 text-right">
+                      {node.eligible && !node.recommended ? (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => onDeploy([node.nodeId], `选择节点 ${node.nodeId}`)}
+                        >
+                          部署到此节点
+                        </Button>
+                      ) : null}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+              {data.nodes.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={7}>
+                    <EmptyState title="没有可选节点" hint="等待 deploy-agent 上报心跳后重新打分。" />
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </div>
+      ) : loading ? (
+        <div className="space-y-2 px-4 py-4 sm:px-5">
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+        </div>
       ) : null}
-    </Card>
+    </Panel>
   )
 }

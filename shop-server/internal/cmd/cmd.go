@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"configure-center/pkg/etcdcfg"
+	"configure-center/pkg/obslog"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gcmd"
@@ -20,11 +21,21 @@ var (
 		Usage: "main",
 		Brief: "shop-server HTTP API",
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
+			// 先接入日志上报，确保启动期的配置加载日志也能被中台看到。
+			obs := obslog.Setup("shop-server")
+			if obs.Enabled() {
+				defer obs.Close()
+				g.Log().Info(ctx, "可观测日志上报已启用")
+			}
+
 			if err = etcdcfg.Boot(ctx); err != nil {
 				return err
 			}
 
 			s := g.Server()
+			obs.AttachLogger(s.Logger())
+			setupSwaggerUI(s)
+			s.Use(obs.Middleware)
 			s.Use(func(r *ghttp.Request) {
 				r.Response.CORSDefault()
 				r.Middleware.Next()

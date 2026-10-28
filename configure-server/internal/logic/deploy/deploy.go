@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "configure-server/api/deploy/v1"
+	obsv "configure-server/internal/observability"
 	"configure-server/internal/service"
 )
 
@@ -30,6 +32,33 @@ func New() *sDeploy {
 	return &sDeploy{}
 }
 
+// 服务名会拼进 tar 文件名、实例目录和容器名，必须限制字符集；
+// 镜像名/平台会直接传给 docker CLI，同样做白名单校验。
+var (
+	serviceNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	imageNamePattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$`)
+	platformPattern    = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9]+$`)
+)
+
+func validateArtifact(meta *v1.ArtifactItem) error {
+	meta.ServiceName = strings.TrimSpace(meta.ServiceName)
+	meta.ImageName = strings.TrimSpace(meta.ImageName)
+	meta.Platform = strings.TrimSpace(meta.Platform)
+	if !serviceNamePattern.MatchString(meta.ServiceName) {
+		return gerror.New("serviceName 只能包含字母、数字、点、下划线、短横线，且不超过 64 字符")
+	}
+	if !imageNamePattern.MatchString(meta.ImageName) {
+		return gerror.New("imageName 格式不合法")
+	}
+	if !platformPattern.MatchString(meta.Platform) {
+		return gerror.New("platform 格式不合法，应形如 linux/amd64")
+	}
+	if meta.ContainerPort <= 0 || meta.ContainerPort > 65535 {
+		return gerror.New("containerPort 必须在 1-65535 之间")
+	}
+	return nil
+}
+
 func artifactDir() string {
 	dir := g.Cfg().MustGet(context.Background(), "deploy.artifactDir").String()
 	if dir == "" {
@@ -39,6 +68,14 @@ func artifactDir() string {
 }
 
 func (s *sDeploy) Heartbeat(ctx context.Context, in *v1.HeartbeatReq) ([]v1.JobItem, error) {
+	if in.Keepalive {
+		// 长任务执行期间 Agent 只续在线时间，不覆盖容器/指标，也不领取新任务。
+		if _, err := g.DB().Model("deploy_nodes").Where("node_id", in.NodeId).
+			Data(g.Map{"last_seen": gtime.Now()}).Update(); err != nil {
+			return nil, err
+		}
+		return []v1.JobItem{}, nil
+	}
 	_ = s.reclaimStaleJobs(ctx)
 	managed := make([]v1.ContainerInfo, 0, len(in.Containers))
 	for _, c := range in.Containers {
@@ -71,14 +108,41 @@ func (s *sDeploy) Heartbeat(ctx context.Context, in *v1.HeartbeatReq) ([]v1.JobI
 	if err != nil {
 		return nil, err
 	}
+	var prevLastSeen *gtime.Time
 	if n == 0 {
 		if _, err = g.DB().Model("deploy_nodes").Data(data).Insert(); err != nil {
 			return nil, err
 		}
 	} else {
+		var prev struct {
+			LastSeen *gtime.Time `orm:"last_seen"`
+		}
+		if serr := g.DB().Model("deploy_nodes").Fields("last_seen").Where("node_id", in.NodeId).Scan(&prev); serr == nil {
+			prevLastSeen = prev.LastSeen
+		}
 		if _, err = g.DB().Model("deploy_nodes").Where("node_id", in.NodeId).Data(data).Update(); err != nil {
 			return nil, err
 		}
+	}
+
+	hostname := in.Hostname
+	if hostname == "" {
+		hostname = in.NodeId
+	}
+	if n == 0 {
+		obsv.Emit(obsv.Entry{
+			Source: obsv.SourceAgent, Action: "node-online", NodeId: in.NodeId,
+			Message: fmt.Sprintf("探针接入：%s（%s/%s，%d 核）", hostname, in.OS, in.Arch, in.Ncpu),
+		})
+	} else if prevLastSeen == nil || time.Since(prevLastSeen.Time) > 45*time.Second {
+		offline := ""
+		if prevLastSeen != nil {
+			offline = time.Since(prevLastSeen.Time).Round(time.Second).String()
+		}
+		obsv.Emit(obsv.Entry{
+			Source: obsv.SourceAgent, Action: "node-online", NodeId: in.NodeId,
+			Message: fmt.Sprintf("探针恢复在线：%s（离线 %s）", hostname, offline),
+		})
 	}
 
 	busy, err := g.DB().Model("deploy_jobs").Where("node_id", in.NodeId).Where("status", "running").Count()
@@ -94,16 +158,37 @@ func (s *sDeploy) Heartbeat(ctx context.Context, in *v1.HeartbeatReq) ([]v1.JobI
 		Where("node_id", in.NodeId).
 		Where("status", "pending").
 		OrderAsc("id").
-		Limit(5).
+		Limit(1).
 		Scan(&rows)
 	if err != nil {
 		return nil, err
 	}
 	jobs := make([]v1.JobItem, 0, len(rows))
 	for _, row := range rows {
-		item, err := s.toAgentJob(ctx, row)
-		if err != nil {
-			return nil, err
+		// 原子认领：只有把 pending 真正改成 running 的那次心跳才能下发任务，
+		// 避免两个同 nodeId 的 Agent（或上报失败后的重试）重复执行同一个任务。
+		res, uerr := g.DB().Model("deploy_jobs").
+			Where("id", row.Id).
+			Where("status", "pending").
+			Data(g.Map{"status": "running", "updated_at": gtime.Now()}).
+			Update()
+		if uerr != nil {
+			return nil, uerr
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			continue
+		}
+		item, jerr := s.toAgentJob(ctx, row)
+		if jerr != nil {
+			_, _ = g.DB().Model("deploy_jobs").Where("id", row.Id).Data(g.Map{
+				"status": "failed", "message": jerr.Error(), "updated_at": gtime.Now(),
+			}).Update()
+			obsv.Emit(obsv.Entry{
+				Level: obsv.LevelWarn, Source: obsv.SourceDeploy, Action: "job-failed",
+				NodeId: in.NodeId, JobId: row.Id,
+				Message: fmt.Sprintf("任务 #%d 无法下发：%v", row.Id, jerr),
+			})
+			continue
 		}
 		jobs = append(jobs, item)
 	}
@@ -124,11 +209,12 @@ func (s *sDeploy) toAgentJob(ctx context.Context, row jobRow) (v1.JobItem, error
 	}
 	if row.ArtifactId > 0 {
 		art, err := s.artifactByID(ctx, row.ArtifactId)
-		if err == nil {
-			item.ContainerPort = art.ContainerPort
-			if item.ImageName == "" {
-				item.ImageName = art.ImageName
-			}
+		if err != nil {
+			return v1.JobItem{}, gerror.Wrapf(err, "任务 #%d 的产物不可用", row.Id)
+		}
+		item.ContainerPort = art.ContainerPort
+		if item.ImageName == "" {
+			item.ImageName = art.ImageName
 		}
 	}
 	if item.LoopbackAs == "" {
@@ -216,7 +302,7 @@ func jobTimeout() time.Duration {
 
 func (s *sDeploy) reclaimStaleJobs(ctx context.Context) error {
 	cutoff := gtime.Now().Add(-jobTimeout())
-	_, err := g.DB().Model("deploy_jobs").
+	res, err := g.DB().Model("deploy_jobs").
 		Where("status", "running").
 		Where("updated_at < ?", cutoff).
 		Data(g.Map{
@@ -224,16 +310,73 @@ func (s *sDeploy) reclaimStaleJobs(ctx context.Context) error {
 			"message":    "任务超时（Agent 可能已中断，请检查节点后重试）",
 			"updated_at": gtime.Now(),
 		}).Update()
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		obsv.Emit(obsv.Entry{
+			Level: obsv.LevelWarn, Source: obsv.SourceDeploy, Action: "job-timeout",
+			Message: fmt.Sprintf("回收超时任务 %d 个（运行超过 %s）", n, jobTimeout()),
+		})
+	}
+	return nil
 }
 
-func (s *sDeploy) ReportJob(ctx context.Context, id int64, status, message string) error {
-	_, err := g.DB().Model("deploy_jobs").Where("id", id).Data(g.Map{
+func (s *sDeploy) ReportJob(ctx context.Context, id int64, nodeId, status, message string) error {
+	var row struct {
+		NodeId      string `orm:"node_id"`
+		ServiceName string `orm:"service_name"`
+		Action      string `orm:"action"`
+		Status      string `orm:"status"`
+	}
+	if err := g.DB().Model("deploy_jobs").
+		Fields("node_id,service_name,action,status").
+		Where("id", id).
+		Scan(&row); err != nil {
+		return err
+	}
+	if row.NodeId == "" {
+		return gerror.Newf("任务不存在: %d", id)
+	}
+	nodeId = strings.TrimSpace(nodeId)
+	if nodeId == "" || row.NodeId != nodeId {
+		return gerror.Newf("任务 #%d 不属于节点 %q", id, nodeId)
+	}
+	// 终态幂等：超时回收或重复上报不再改写已有结果。
+	if row.Status == "success" || row.Status == "failed" {
+		return nil
+	}
+	data := g.Map{
 		"status":     status,
-		"message":    message,
 		"updated_at": gtime.Now(),
-	}).Update()
-	return err
+	}
+	// 空的 message 用于保活/开始执行，不能把发布备注覆盖成空。
+	if message != "" {
+		data["message"] = message
+	}
+	if _, err := g.DB().Model("deploy_jobs").Where("id", id).Data(data).Update(); err != nil {
+		return err
+	}
+	level := obsv.LevelInfo
+	statusText := status
+	switch status {
+	case "failed":
+		level = obsv.LevelError
+		statusText = "失败"
+	case "success":
+		statusText = "成功"
+	case "running":
+		statusText = "执行中"
+	}
+	text := fmt.Sprintf("任务 #%d %s %s %s", id, row.Action, row.ServiceName, statusText)
+	if message != "" {
+		text += "：" + message
+	}
+	obsv.Emit(obsv.Entry{
+		Level: level, Source: obsv.SourceDeploy, Action: "job-" + status,
+		NodeId: row.NodeId, JobId: id, Message: text,
+	})
+	return nil
 }
 
 func (s *sDeploy) ListNodes(ctx context.Context) ([]v1.NodeItem, error) {
@@ -313,6 +456,9 @@ func toArtifactItem(row artifactRow) v1.ArtifactItem {
 }
 
 func (s *sDeploy) SaveArtifact(ctx context.Context, meta v1.ArtifactItem, r io.Reader) (*v1.ArtifactItem, error) {
+	if err := validateArtifact(&meta); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(artifactDir(), 0o755); err != nil {
 		return nil, err
 	}
@@ -364,6 +510,10 @@ func (s *sDeploy) SaveArtifact(ctx context.Context, meta v1.ArtifactItem, r io.R
 		return nil, err
 	}
 	item := toArtifactItem(*row)
+	obsv.Emit(obsv.Entry{
+		Source: obsv.SourceDeploy, Action: "artifact-upload", User: operator,
+		Message: fmt.Sprintf("上传产物 #%d %s（%s，%.1f MB）", id, meta.ServiceName, meta.Platform, float64(n)/1024/1024),
+	})
 	return &item, nil
 }
 
@@ -436,7 +586,18 @@ func (s *sDeploy) insertNodeJob(ctx context.Context, nodeId string, art *artifac
 	if !platformsMatch(art.Platform, node.DockerPlatform) {
 		return 0, gerror.Newf("产物平台 %s 与节点 Docker %s 不一致，请重新打包", art.Platform, node.DockerPlatform)
 	}
-	return g.DB().Model("deploy_jobs").Data(g.Map{
+	pending, err := g.DB().Model("deploy_jobs").
+		Where("node_id", nodeId).
+		Where("service_name", art.ServiceName).
+		WhereIn("status", []string{"pending", "running", "waiting"}).
+		Count()
+	if err != nil {
+		return 0, err
+	}
+	if pending > 0 {
+		return 0, gerror.Newf("节点 %s 上 %s 已有未完成的任务，请等待完成后再操作", nodeId, art.ServiceName)
+	}
+	id, err := g.DB().Model("deploy_jobs").Data(g.Map{
 		"node_id":        nodeId,
 		"artifact_id":    art.Id,
 		"service_name":   art.ServiceName,
@@ -450,6 +611,14 @@ func (s *sDeploy) insertNodeJob(ctx context.Context, nodeId string, art *artifac
 		"operator":       operator,
 		"updated_at":     gtime.Now(),
 	}).InsertAndGetId()
+	if err != nil {
+		return 0, err
+	}
+	obsv.Emit(obsv.Entry{
+		Source: obsv.SourceDeploy, Action: "job-create", NodeId: nodeId, JobId: id, User: operator,
+		Message: fmt.Sprintf("创建任务 #%d：%s %s（%s，端口 %d）", id, action, art.ServiceName, status, hostPort),
+	})
+	return id, nil
 }
 
 func (s *sDeploy) nodeByID(ctx context.Context, nodeId string) (*nodeRow, error) {
@@ -496,6 +665,10 @@ func (s *sDeploy) Rollback(ctx context.Context, nodeId, serviceName, operator, r
 		return 0, err
 	}
 	_, _ = g.DB().Model("deploy_jobs").Where("id", ids[0]).Data(g.Map{"action": "rollback"}).Update()
+	obsv.Emit(obsv.Entry{
+		Source: obsv.SourceDeploy, Action: "rollback", NodeId: nodeId, JobId: ids[0], User: operator,
+		Message: fmt.Sprintf("回滚 %s/%s 至产物 #%d（任务 #%d）", nodeId, serviceName, prev.ArtifactId, ids[0]),
+	})
 	return ids[0], nil
 }
 
@@ -525,6 +698,12 @@ func (s *sDeploy) Promote(ctx context.Context, artifactId int64, operator, remar
 			"message":    remark,
 			"updated_at": gtime.Now(),
 		}).Update()
+		if err == nil {
+			obsv.Emit(obsv.Entry{
+				Source: obsv.SourceDeploy, Action: "promote", User: operator,
+				Message: fmt.Sprintf("推进灰度：%d 个等待任务进入待执行（产物 #%d）", len(ids), artifactId),
+			})
+		}
 		return ids, err
 	}
 
@@ -581,6 +760,10 @@ func (s *sDeploy) Promote(ctx context.Context, artifactId int64, operator, remar
 		}
 		ids = append(ids, stopId)
 	}
+	obsv.Emit(obsv.Entry{
+		Source: obsv.SourceDeploy, Action: "promote", User: operator,
+		Message: fmt.Sprintf("推进旁路灰度：%d 个节点（产物 #%d）", len(seen), artifactId),
+	})
 	return ids, nil
 }
 
@@ -619,8 +802,19 @@ func (s *sDeploy) insertLifecycleJob(ctx context.Context, nodeId, serviceName, a
 		if !found {
 			return 0, gerror.Newf("节点 %s 上没有容器 %s，请先发布", nodeId, want)
 		}
+		pending, err := g.DB().Model("deploy_jobs").
+			Where("node_id", nodeId).
+			Where("service_name", serviceName).
+			WhereIn("status", []string{"pending", "running", "waiting"}).
+			Count()
+		if err != nil {
+			return 0, err
+		}
+		if pending > 0 {
+			return 0, gerror.Newf("节点 %s 上 %s 已有未完成的任务，请等待完成后再操作", nodeId, serviceName)
+		}
 	}
-	return g.DB().Model("deploy_jobs").Data(g.Map{
+	id, err := g.DB().Model("deploy_jobs").Data(g.Map{
 		"node_id":        nodeId,
 		"artifact_id":    0,
 		"service_name":   serviceName,
@@ -634,6 +828,14 @@ func (s *sDeploy) insertLifecycleJob(ctx context.Context, nodeId, serviceName, a
 		"operator":       operator,
 		"updated_at":     gtime.Now(),
 	}).InsertAndGetId()
+	if err != nil {
+		return 0, err
+	}
+	obsv.Emit(obsv.Entry{
+		Source: obsv.SourceDeploy, Action: "job-create", NodeId: nodeId, JobId: id, User: operator,
+		Message: fmt.Sprintf("创建任务 #%d：%s %s", id, action, serviceName),
+	})
+	return id, nil
 }
 
 func (s *sDeploy) ListJobs(ctx context.Context, nodeId string) ([]v1.DeployJobItem, error) {
@@ -671,10 +873,10 @@ func (s *sDeploy) ListJobs(ctx context.Context, nodeId string) ([]v1.DeployJobIt
 	return out, nil
 }
 
-func (s *sDeploy) ArtifactFile(ctx context.Context, id int64) (string, error) {
+func (s *sDeploy) ArtifactFile(ctx context.Context, id int64) (string, string, error) {
 	row, err := s.artifactByID(ctx, id)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return row.FilePath, nil
+	return row.FilePath, row.Sha256, nil
 }

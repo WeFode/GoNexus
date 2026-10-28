@@ -36,7 +36,7 @@ func (c *ControllerV1) Heartbeat(ctx context.Context, req *v1.HeartbeatReq) (*v1
 }
 
 func (c *ControllerV1) ReportJob(ctx context.Context, req *v1.ReportJobReq) (*v1.ReportJobRes, error) {
-	return &v1.ReportJobRes{}, service.Deploy().ReportJob(ctx, req.Id, req.Status, req.Message)
+	return &v1.ReportJobRes{}, service.Deploy().ReportJob(ctx, req.Id, req.NodeId, req.Status, req.Message)
 }
 
 func (c *ControllerV1) ListNodes(ctx context.Context, _ *v1.ListNodesReq) (*v1.ListNodesRes, error) {
@@ -138,7 +138,7 @@ func (c *ControllerV1) ListJobs(ctx context.Context, req *v1.ListJobsReq) (*v1.L
 
 func DownloadArtifact(r *ghttp.Request) {
 	id := r.Get("id").Int64()
-	path, err := service.Deploy().ArtifactFile(r.Context(), id)
+	path, sha256, err := service.Deploy().ArtifactFile(r.Context(), id)
 	if err != nil {
 		r.Response.WriteStatusExit(404, err.Error())
 		return
@@ -146,6 +146,10 @@ func DownloadArtifact(r *ghttp.Request) {
 	if _, err = os.Stat(path); err != nil {
 		r.Response.WriteStatusExit(404, "产物文件不存在")
 		return
+	}
+	if sha256 != "" {
+		// Agent 下载后用它校验 tar 完整性，避免坏包直接进 docker load。
+		r.Response.Header().Set("X-Artifact-Sha256", sha256)
 	}
 	r.Response.ServeFileDownload(path)
 }

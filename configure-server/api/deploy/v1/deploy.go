@@ -22,6 +22,7 @@ type NodeMetrics struct {
 type HeartbeatReq struct {
 	g.Meta         `path:"/agent/heartbeat" method:"post" tags:"Agent" summary:"节点心跳"`
 	NodeId         string          `json:"nodeId" v:"required"`
+	Keepalive      bool            `json:"keepalive" dc:"仅刷新 last_seen，不覆盖节点指标、不分发任务"`
 	Hostname       string          `json:"hostname"`
 	OS             string          `json:"os"`
 	Arch           string          `json:"arch"`
@@ -56,6 +57,7 @@ type JobItem struct {
 type ReportJobReq struct {
 	g.Meta  `path:"/agent/jobs/{id}/report" method:"post" tags:"Agent" summary:"回写任务结果"`
 	Id      int64  `path:"id" v:"required"`
+	NodeId  string `json:"nodeId" v:"required#nodeId 不能为空" dc:"上报者节点，服务端校验任务归属"`
 	Status  string `json:"status" v:"required|in:running,success,failed"`
 	Message string `json:"message"`
 }

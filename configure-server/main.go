@@ -1,6 +1,8 @@
 package main
 
 import (
+	_ "time/tzdata" // scratch 镜像里没有 zoneinfo，嵌入后 TZ=Asia/Shanghai 才生效
+
 	_ "configure-server/internal/packed"
 
 	_ "github.com/gogf/gf/contrib/drivers/dm/v2"

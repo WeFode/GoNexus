@@ -136,9 +136,17 @@ func Stats(names []string) (map[string]Container, error) {
 	return out, nil
 }
 
+// Remove 删除容器。容器本来就不存在时视为成功，其它错误必须上抛，
+// 否则同名容器残留会让后续 docker run 失败，而日志只看到 run 报错。
 func Remove(name string) error {
-	_, _ = Run("rm", "-f", name)
-	return nil
+	_, err := Run("rm", "-f", name)
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "no such container") {
+		return nil
+	}
+	return err
 }
 
 func RunDetached(name, image, network string, hostPort, containerPort int, configPath, dataDir string) error {

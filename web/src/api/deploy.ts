@@ -161,3 +161,43 @@ export function listDeployJobs(nodeId?: string) {
   const q = nodeId ? `?nodeId=${encodeURIComponent(nodeId)}` : ''
   return request<{ list: DeployJobItem[] }>(`/api/v1/deploys${q}`).then((d) => d.list ?? [])
 }
+
+/** 任务健康/回滚语义解析（与 deploy-agent 0.4.0 的 message 约定对应） */
+export interface JobSemantics {
+  healthOk: boolean
+  autoRolledBack: boolean
+  noPrevious: boolean
+}
+
+export function parseJobSemantics(job: DeployJobItem): JobSemantics {
+  const m = (job.message || '').toLowerCase()
+  return {
+    healthOk: m.includes('health ok'),
+    autoRolledBack: m.includes('rolled back') || m.includes('rollback also failed') || m.includes('also unhealthy'),
+    noPrevious: m.includes('no previous version'),
+  }
+}
+
+export function jobStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    pending: '执行中',
+    waiting: '灰度等待',
+    running: '执行中',
+    success: '成功',
+    failed: '失败',
+  }
+  return map[status] ?? status
+}
+
+export function actionLabel(action: string): string {
+  const map: Record<string, string> = {
+    deploy: '发布',
+    rollback: '回滚',
+    canary: '旁路灰度',
+    'stop-canary': '下线灰度',
+    start: '启动',
+    stop: '停止',
+    restart: '重启',
+  }
+  return map[action] ?? action
+}

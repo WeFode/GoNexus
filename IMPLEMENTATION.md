@@ -53,7 +53,7 @@ compose 把 `configure-server/manifest/sql/pgsql` 交给 `scripts/pg-init`：首
 | **Go 1.25+** | 各 `go run` / `package.ps1` | 编译微服务与配置中心 |
 | **Docker Desktop** | compose、Agent、`package.ps1` | 基础设施、`docker load/run`、打 scratch 镜像 |
 | **etcdctl** | `scripts/etcd-rbac.sh`（生产可选） | 开 auth、给微服务只读角色 |
-| **Node.js + npm** | `web/` | Vite 开发服务器、antd 中台 |
+| **Node.js + npm** | `web/` | Vite 开发服务器、shadcn/ui 中台 |
 | **PowerShell / bash** | `package.ps1` / `package.sh` | 交叉编译 + `docker save` 出 tar |
 
 Agent **不**用 Docker SDK，只 `exec.Command("docker", ...)`（`deploy-agent/internal/dockerx/docker.go`）。
@@ -84,10 +84,11 @@ configure-server **不用** `etcdcfg.Boot` 替换自己的 `g.Cfg()`。它的 HT
 | 包 | 用途 |
 |----|------|
 | React 19 + react-router-dom 7 | 页面与路由 |
-| antd 6 + @ant-design/icons | 中台 UI |
-| Vite 7 + @vitejs/plugin-react | 开发与打包 |
-| Tailwind 4（`@tailwindcss/vite`，无 preflight） | 间距/排版，不覆盖 antd |
-| dayjs | 时间（antd 依赖） |
+| shadcn/ui（`radix-ui` 原语）+ lucide-react | 中台 UI 与图标 |
+| Tailwind CSS 4（`@tailwindcss/vite`） | 设计 token、布局与排版 |
+| class-variance-authority + tailwind-merge + clsx | 变体与类名合并（`cn()`） |
+| sonner | 轻提示 toast |
+| Vite 7 + @vitejs/plugin-react | 开发与打包（vendor 手动分包） |
 
 浏览器 **只** 调 configure-server。Vite 把 `/api` 代理到 `http://127.0.0.1:9000`（`web/vite.config.ts`）。前端从不直连 etcd。
 

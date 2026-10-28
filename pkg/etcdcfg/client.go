@@ -72,11 +72,20 @@ func NewClient(ctx context.Context, opts Options) (*Client, error) {
 		return nil, gerror.Wrapf(err, "连接 etcd 失败: %s", strings.Join(parsed.Endpoints, ","))
 	}
 
-	pingCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if err = ping(pingCtx, cli, parsed.Endpoints[0]); err != nil {
+	// 逐个尝试 endpoints，避免多节点 etcd 中第一个端点故障导致无法启动；
+	// 每个端点独立超时，不让第一个挂起的端点吃掉后面端点的时间。
+	var pingErr error
+	for _, endpoint := range parsed.Endpoints {
+		pingCtx, cancel := context.WithTimeout(ctx, timeout)
+		pingErr = ping(pingCtx, cli, endpoint)
+		cancel()
+		if pingErr == nil {
+			break
+		}
+	}
+	if pingErr != nil {
 		_ = cli.Close()
-		return nil, err
+		return nil, pingErr
 	}
 
 	return &Client{

@@ -82,5 +82,6 @@ CREATE TABLE IF NOT EXISTS "DEPLOY_JOBS" (
     );
 
 CREATE INDEX "IDX_DEPLOY_JOBS_NODE" ON "DEPLOY_JOBS" ("NODE_ID", "STATUS", "ID");
+CREATE INDEX "IDX_DEPLOY_JOBS_STATUS_UPDATED" ON "DEPLOY_JOBS" ("STATUS", "UPDATED_AT");
 
 COMMENT ON TABLE "DEPLOY_JOBS" IS '发布任务：waiting（灰度等待）/ pending → running → success/failed；action=deploy|rollback|canary|start|stop|restart|stop-canary';

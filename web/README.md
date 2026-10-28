@@ -1,25 +1,25 @@
 # 配置中心前端
 
-Vite + React 19 + Ant Design 6 + Tailwind CSS 4 的中台控制台，对接 `configure-server` HTTP API。
+Vite 7 + React 19 + shadcn/ui（Radix）+ Tailwind CSS 4 的中台控制台，只对接 `configure-server` 的 HTTP API。
 
-## 本地开发
+权威文档在 `docs/`：
 
-先启动配置中心（`:9000`），再：
+| 你要做什么 | 看哪里 |
+|------------|--------|
+| 本地跑起来 | [快速开始](../docs/01-getting-started/quickstart.md#5-起中台前端) |
+| 目录结构、路由与鉴权流、页面对应接口、组件约定、11 张界面截图 | [中台前端](../docs/02-reference/web-console.md) |
+| 后端接口字段 | [HTTP API 参考](../docs/02-reference/api.md) |
+| 改代码 | [贡献指南](../CONTRIBUTING.md#前端) |
+
+## 开发
 
 ```bash
-cd web
 npm install
-npm run dev
+npm run dev        # :5173，/api 代理到 http://127.0.0.1:9000
+npm run build      # tsc && vite build → dist/
+npm run preview
 ```
 
-浏览器打开 http://127.0.0.1:5173 。Vite 将 `/api` 代理到 `http://127.0.0.1:9000`。
+需要先起 configure-server，否则所有接口 502。
 
-## 功能
-
-| 页面 | 对应接口 |
-|------|----------|
-| 概览 | `GET /api/v1/health`、列表统计、`POST /api/v1/configs/seed` |
-| 公共配置 | `/api/v1/configs/shared` CRUD |
-| 服务配置 | `/api/v1/configs/services` CRUD + 合并预览 |
-
-后续业务模块可在 `src/pages` 增加路由，并在 `src/layouts/AdminLayout.tsx` 的菜单中注册。
+登录账户来自 `configure-server/manifest/config/config.yaml` 的 `auth.users`（本地默认 `admin` / `admin123`）。
