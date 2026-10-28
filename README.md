@@ -4,18 +4,18 @@
 
 面向内网 / 私有部署，支持信创达梦 DM8 与 Linux ARM64 离线环境。
 
-[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE) · [Gitee 仓库](https://gitee.com/lin_30_0/configure-center)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE) · [Gitee 仓库](https://gitee.com/lin_30_0/configure-center) · [GitHub 仓库](https://github.com/WeFode/GoNexus)
 
 ## 界面一览
 
-中台前端基于 **shadcn/ui（Radix + Tailwind CSS 4）**，支持亮 / 暗双主题；下面截图来自当前版本。
+中台前端基于 **shadcn/ui（Radix + Tailwind CSS 4）**，支持亮 / 暗双主题；下面截图统一使用**暗色主题**，亮色示例见文末。
 
 | | |
 |:--:|:--:|
 | **概览**<br><img src="docs/assets/screenshots/overview.png" width="480" alt="概览：配置源状态、接入规模与最近发布任务"> | **服务配置**<br><img src="docs/assets/screenshots/services.png" width="480" alt="服务配置：每个服务一张卡片，直接渲染当前 YAML"> |
 | **发布**<br><img src="docs/assets/screenshots/deploys.png" width="480" alt="发布：上传 tar、选节点、灰度/全量、回滚"> | **节点**<br><img src="docs/assets/screenshots/nodes.png" width="480" alt="节点：deploy-agent 上报的机器与容器"> |
 
-全部 13 张截图与逐页说明见 [中台前端 · 界面一览](./docs/02-reference/web-console.md#界面一览)。截图由本地 mock 后端渲染，**服务名、节点、镜像、时间均为虚构数据**；暗色示例见 [亮 / 暗主题](./docs/02-reference/web-console.md#亮暗主题)。
+全部 13 张截图与逐页说明见 [中台前端 · 界面一览](./docs/02-reference/web-console.md#界面一览)。截图由本地 mock 后端渲染，**服务名、节点、镜像、时间均为虚构数据**；亮色示例见 [亮 / 暗主题](./docs/02-reference/web-console.md#亮暗主题)。
 
 ## 文档
 
